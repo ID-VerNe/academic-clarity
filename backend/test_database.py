@@ -2,6 +2,7 @@ import os
 import unittest
 import sqlite3
 import sys
+import uuid
 
 # Add backend to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -9,12 +10,19 @@ from database import Database
 
 class TestDatabase(unittest.TestCase):
     def setUp(self):
-        self.db_path = "test_library.db"
+        self.db_path = f"test_db_{uuid.uuid4().hex}.db"
         self.db = Database(self.db_path)
 
     def tearDown(self):
         if os.path.exists(self.db_path):
-            os.remove(self.db_path)
+            try:
+                os.remove(self.db_path)
+                # Also remove WAL files if they exist
+                for ext in ["-wal", "-shm"]:
+                    if os.path.exists(self.db_path + ext):
+                        os.remove(self.db_path + ext)
+            except:
+                pass
 
     def test_add_get_document(self):
         doc_id = self.db.add_document("test.pdf", "orig/path", "stored/path")

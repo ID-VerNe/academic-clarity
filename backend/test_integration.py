@@ -5,6 +5,8 @@ import asyncio
 from unittest.mock import MagicMock, patch
 from io import BytesIO
 import json
+import uuid
+import shutil
 
 # --- Path Configuration ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,11 +20,11 @@ from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown
 class TestAcademicClarityIntegration(unittest.TestCase):
     def setUp(self):
         # 1. 设置独立的测试数据库和工作区
-        self.test_workspace = os.path.join(BASE_DIR, "test_workspace_integration")
+        self.test_workspace = os.path.join(BASE_DIR, f"test_workspace_integration_{uuid.uuid4().hex}")
         if not os.path.exists(self.test_workspace):
             os.makedirs(self.test_workspace)
         
-        self.db_path = os.path.join(self.test_workspace, "test_library.db")
+        self.db_path = os.path.join(self.test_workspace, f"test_library_{uuid.uuid4().hex}.db")
         if os.path.exists(self.db_path): os.remove(self.db_path)
         
         self.db = Database(self.db_path)
@@ -36,12 +38,21 @@ class TestAcademicClarityIntegration(unittest.TestCase):
         self.db.set_config("MODEL_NAME", "deepseek-ai/DeepSeek-V3")
 
     def tearDown(self):
-        # 清理测试数据库（保留 PDF 副本供后续观察，可选）
-        if os.path.exists(self.db_path): os.remove(self.db_path)
+        # 清理测试数据库
+        if os.path.exists(self.db_path):
+            try:
+                os.remove(self.db_path)
+                for ext in ["-wal", "-shm"]:
+                    if os.path.exists(self.db_path + ext):
+                        os.remove(self.db_path + ext)
+            except:
+                pass
         # 清理工作区目录
-        import shutil
         if os.path.exists(self.test_workspace):
-            shutil.rmtree(self.test_workspace)
+            try:
+                shutil.rmtree(self.test_workspace)
+            except:
+                pass
 
     def test_workflow_full_pipeline_mocked(self):
         """

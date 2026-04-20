@@ -5,6 +5,7 @@ import asyncio
 import json
 import shutil
 import sqlite3
+import uuid
 from unittest.mock import MagicMock, patch
 from io import BytesIO
 
@@ -18,11 +19,11 @@ from services.ai_service import call_json_extraction_api
 
 class TestEdgeCases(unittest.TestCase):
     def setUp(self):
-        self.test_workspace = os.path.join(BASE_DIR, "test_workspace_edge")
+        self.test_workspace = os.path.join(BASE_DIR, f"test_workspace_edge_{uuid.uuid4().hex}")
         if not os.path.exists(self.test_workspace):
             os.makedirs(self.test_workspace)
         
-        self.db_path = os.path.join(self.test_workspace, "test_library_edge.db")
+        self.db_path = os.path.join(self.test_workspace, f"test_library_edge_{uuid.uuid4().hex}.db")
         if os.path.exists(self.db_path):
             os.remove(self.db_path)
         
@@ -31,9 +32,18 @@ class TestEdgeCases(unittest.TestCase):
 
     def tearDown(self):
         if os.path.exists(self.db_path):
-            os.remove(self.db_path)
+            try:
+                os.remove(self.db_path)
+                for ext in ["-wal", "-shm"]:
+                    if os.path.exists(self.db_path + ext):
+                        os.remove(self.db_path + ext)
+            except:
+                pass
         if os.path.exists(self.test_workspace):
-            shutil.rmtree(self.test_workspace)
+            try:
+                shutil.rmtree(self.test_workspace)
+            except:
+                pass
 
     def test_empty_pdf_handling(self):
         """1. Test handling of an empty (0-byte) PDF file."""

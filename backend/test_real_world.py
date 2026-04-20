@@ -3,6 +3,8 @@ import sys
 import asyncio
 import json
 import time
+import uuid
+import shutil
 
 # --- Path Configuration ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,36 +20,36 @@ async def run_real_integration_test():
     print("====================================================")
 
     # 1. 初始化测试环境
-    test_ws = os.path.join(BASE_DIR, "real_test_workspace")
+    test_ws = os.path.join(BASE_DIR, f"real_test_workspace_{uuid.uuid4().hex}")
     if not os.path.exists(test_ws): os.makedirs(test_ws)
     
-    db_path = os.path.join(test_ws, "real_test.db")
+    db_path = os.path.join(test_ws, f"real_test_{uuid.uuid4().hex}.db")
     if os.path.exists(db_path): os.remove(db_path)
     db = Database(db_path)
 
-    # 2. 配置 API Keys (从原始配置中恢复)
-    # OCR 使用硅基流动
-    db.set_config("DEEPSEEK_API_KEY", "sk-amxyrkodwpvxguiumotfrgjirqstfqmghmiytbdvhriejtve")
-    db.set_config("API_BASE", "https://api.siliconflow.cn/v1")
-    db.set_config("MODEL_NAME", "openai/deepseek-ai/DeepSeek-OCR")
-
-    # JSON 提取使用本地接口
-    db.set_config("EXTRACT_API_KEY", "sk-copilot-sdk-default")
-    db.set_config("EXTRACT_API_BASE", "http://localhost:37210/v1")
-    db.set_config("EXTRACT_MODEL_NAME", "gpt-4.1")
-
-    # 3. 指定 PDF 文件
-    pdf_path = r"C:\Users\VerNe\Downloads\Documents\academic-clarity\workspace\10_48550-arxiv_2103_12553.pdf"
-    if not os.path.exists(pdf_path):
-        print(f"[ERROR] PDF not found at: {pdf_path}")
-        return
-
-    # 4. 执行全链路 OCR + JSON 提取
-    print(f"[Phase 1] Starting Real OCR for: {os.path.basename(pdf_path)}")
-    doc_id = db.add_document(os.path.basename(pdf_path), pdf_path, pdf_path)
-    
-    start_time = time.time()
     try:
+        # 2. 配置 API Keys (从原始配置中恢复)
+        # OCR 使用硅基流动
+        db.set_config("DEEPSEEK_API_KEY", "sk-amxyrkodwpvxguiumotfrgjirqstfqmghmiytbdvhriejtve")
+        db.set_config("API_BASE", "https://api.siliconflow.cn/v1")
+        db.set_config("MODEL_NAME", "openai/deepseek-ai/DeepSeek-OCR")
+
+        # JSON 提取使用本地接口
+        db.set_config("EXTRACT_API_KEY", "sk-copilot-sdk-default")
+        db.set_config("EXTRACT_API_BASE", "http://localhost:37210/v1")
+        db.set_config("EXTRACT_MODEL_NAME", "gpt-4.1")
+
+        # 3. 指定 PDF 文件
+        pdf_path = r"C:\Users\VerNe\Downloads\Documents\academic-clarity\workspace\10_48550-arxiv_2103_12553.pdf"
+        if not os.path.exists(pdf_path):
+            print(f"[ERROR] PDF not found at: {pdf_path}")
+            return
+
+        # 4. 执行全链路 OCR + JSON 提取
+        print(f"[Phase 1] Starting Real OCR for: {os.path.basename(pdf_path)}")
+        doc_id = db.add_document(os.path.basename(pdf_path), pdf_path, pdf_path)
+        
+        start_time = time.time()
         await run_full_ocr_workflow(doc_id, pdf_path, db)
         duration = time.time() - start_time
         
@@ -67,6 +69,17 @@ async def run_real_integration_test():
 
     except Exception as e:
         print(f"\n[ERROR] CRITICAL ERROR during test: {e}")
+    finally:
+        # Cleanup
+        if os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+                for ext in ["-wal", "-shm"]:
+                    if os.path.exists(db_path + ext):
+                        os.remove(db_path + ext)
+            except: pass
+        if os.path.exists(test_ws):
+            shutil.rmtree(test_ws, ignore_errors=True)
 
 if __name__ == "__main__":
     asyncio.run(run_real_integration_test())
