@@ -3,19 +3,23 @@ import sys
 import subprocess
 import time
 import shutil
-import uuid
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-def run_python_test(test_file, python_exe, backend_dir):
-    """运行单个 Python 测试文件"""
+def run_python_test(test_file, python_exe, tests_dir, backend_dir):
+    """运行单个 Python 测试文件，并确保 backend 在 sys.path 中"""
     start = time.time()
     try:
+        # 设置环境变量，确保测试脚本能导入 backend 目录下的模块
+        env = os.environ.copy()
+        env["PYTHONPATH"] = backend_dir + os.pathsep + env.get("PYTHONPATH", "")
+        
         proc = subprocess.run(
-            [python_exe, os.path.join(backend_dir, test_file)],
+            [python_exe, os.path.join(tests_dir, test_file)],
             capture_output=True,
             text=True,
             encoding='utf-8',
             errors='replace',
+            env=env,
             timeout=180
         )
         return {
@@ -33,7 +37,6 @@ def run_frontend_lint(root_dir):
     start = time.time()
     print("  [Spawn] Starting Frontend Lint (pnpm lint)...")
     try:
-        # 在 Windows 下使用 shell=True 运行 pnpm
         proc = subprocess.run(
             "pnpm lint",
             cwd=root_dir,
@@ -54,24 +57,25 @@ def run_frontend_lint(root_dir):
     except Exception as e:
         return {"name": "Frontend Lint", "success": False, "stdout": "", "stderr": str(e), "duration": 0}
 
-def cleanup_temp_files(backend_dir):
-    """清理临时文件"""
-    for f in os.listdir(backend_dir):
+def cleanup_temp_files(tests_dir):
+    """清理测试产生的临时文件"""
+    for f in os.listdir(tests_dir):
         if any(prefix in f for prefix in ["test_db_", "test_workspace_", "test_audit_"]):
-            path = os.path.join(backend_dir, f)
+            path = os.path.join(tests_dir, f)
             try:
                 if os.path.isdir(path): shutil.rmtree(path, ignore_errors=True)
                 else: os.remove(path)
             except: pass
 
 def run_suite():
-    BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
-    ROOT_DIR = os.path.dirname(BACKEND_DIR)
+    TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+    ROOT_DIR = os.path.dirname(TESTS_DIR)
+    BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
     python_exe = os.path.join(ROOT_DIR, "python_embed", "python.exe")
     if not os.path.exists(python_exe): python_exe = sys.executable
 
     # 1. 收集任务
-    py_test_files = [f for f in os.listdir(BACKEND_DIR) if f.startswith("test_") and f.endswith(".py")]
+    py_test_files = [f for f in os.listdir(TESTS_DIR) if f.startswith("test_") and f.endswith(".py")]
     
     real_world_test = None
     if "test_real_world.py" in py_test_files:
@@ -85,14 +89,12 @@ def run_suite():
     results = {"passed": 0, "failed": 0, "failed_list": []}
     start_total = time.time()
 
-    # 2. 并行池：混合投放 Frontend Lint 和 Python Unit Tests
+    # 2. 并行池
     with ProcessPoolExecutor(max_workers=os.cpu_count() + 1) as executor:
         futures = []
-        # 投放前端任务
         futures.append(executor.submit(run_frontend_lint, ROOT_DIR))
-        # 投放后端任务
         for f in py_test_files:
-            futures.append(executor.submit(run_python_test, f, python_exe, BACKEND_DIR))
+            futures.append(executor.submit(run_python_test, f, python_exe, TESTS_DIR, BACKEND_DIR))
         
         for future in as_completed(futures):
             res = future.result()
@@ -105,10 +107,10 @@ def run_suite():
                 results["failed_list"].append(res["name"])
                 print(f"--- OUTPUT for {res['name']} ---\n{res['stdout']}\n{res['stderr']}\n---------------------------------")
 
-    # 3. 串行执行真实环境测试（独占资源）
+    # 3. 串行执行真实环境测试
     if real_world_test:
         print(f"Running {real_world_test} (Serial)...")
-        res = run_python_test(real_world_test, python_exe, BACKEND_DIR)
+        res = run_python_test(real_world_test, python_exe, TESTS_DIR, BACKEND_DIR)
         if res["success"]:
             print(f"  [PASS] {res['name']} ({res['duration']:.2f}s)")
             results["passed"] += 1
@@ -118,7 +120,7 @@ def run_suite():
             results["failed_list"].append(res["name"])
 
     # 4. 清理并汇总
-    cleanup_temp_files(BACKEND_DIR)
+    cleanup_temp_files(TESTS_DIR)
     duration = time.time() - start_total
     
     print("\n====================================================")

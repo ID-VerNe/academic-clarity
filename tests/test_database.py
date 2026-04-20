@@ -5,7 +5,9 @@ import sys
 import uuid
 
 # Add backend to path for imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+BACKEND_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
+if BACKEND_PATH not in sys.path: sys.path.insert(0, BACKEND_PATH)
+
 from database import Database
 
 class TestDatabase(unittest.TestCase):

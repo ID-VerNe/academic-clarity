@@ -8,8 +8,8 @@ from unittest.mock import patch, MagicMock
 
 # Add backend to path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+BACKEND_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend"))
+if BACKEND_PATH not in sys.path: sys.path.insert(0, BACKEND_PATH)
 
 from database import Database
 from services.workspace_service import WorkspaceService

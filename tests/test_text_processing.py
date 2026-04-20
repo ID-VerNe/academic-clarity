@@ -3,8 +3,8 @@ import os
 import unittest
 
 # Add backend to path for imports
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(BASE_DIR)
+BACKEND_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
+if BACKEND_PATH not in sys.path: sys.path.insert(0, BACKEND_PATH)
 
 # Updated import path after refactoring
 from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown

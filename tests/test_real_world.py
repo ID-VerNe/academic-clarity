@@ -8,7 +8,8 @@ import shutil
 
 # --- Path Configuration ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(BASE_DIR)
+BACKEND_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend"))
+if BACKEND_PATH not in sys.path: sys.path.insert(0, BACKEND_PATH)
 
 from database import Database
 from services.ocr_service import run_full_ocr_workflow

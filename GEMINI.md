@@ -12,16 +12,18 @@ We use a layered testing strategy to ensure robustness:
 
 | Layer | Tool | Command | Scope |
 | :--- | :--- | :--- | :--- |
-| **Unit** | Python `unittest` | `.\python_embed\python.exe backend/test_database.py` | DB CRUD, Text cleaning |
-| **Security** | Custom Audit | `.\python_embed\python.exe backend/test_final_audit.py` | Path traversal, SQL Injection |
-| **Integration**| Real API Test | `.\python_embed\python.exe backend/test_real_world.py` | OCR -> JSON -> DB Full Cycle |
+| **Unit** | Python `unittest` | `.\python_embed\python.exe tests/test_database.py` | DB CRUD, Text cleaning |
+| **Security** | Custom Audit | `.\python_embed\python.exe tests/test_final_audit.py` | Path traversal, SQL Injection |
+| **Integration**| Real API Test | `.\python_embed\python.exe tests/test_real_world.py` | OCR -> JSON -> DB Full Cycle |
 | **Build** | Vite/TSC | `pnpm build` | TS Types, Frontend bundling |
 
 ## 3. High-Performance Testing (Parallel & Isolated)
 Run `run_tests.bat` in the root directory. 
+- **Centralized**: All test cases are located in the `tests/` directory.
 - **Isolation**: Each test process automatically creates a unique, UUID-based temporary database and workspace. 
 - **Concurrency**: Tests run in parallel using multiple CPU cores to maximize speed.
-- **Auto-Cleanup**: All temporary artifacts (test databases, temp folders) are physically deleted immediately after completion, regardless of the test outcome.
+- **Auto-Cleanup**: All temporary artifacts (test databases, temp folders) are physically deleted from the `tests/` directory immediately after completion.
+
 
 ## 4. Multi-Dimensional Knowledge Graph (Intelligence Insight)
 - **Modular Metadata**: Documents support multiple JSON metadata sets (e.g., Basic Insight, Experimental Analysis).

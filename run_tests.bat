@@ -7,13 +7,13 @@ echo    Academic Clarity - Ultra Parallel Tests
 echo ==========================================
 echo.
 
-:: 直接调用全量并行调度器
+:: 直接调用 tests 文件夹下的并行调度器
 if not exist "python_embed\python.exe" (
     echo [ERROR] python_embed\python.exe not found!
     exit /b 1
 )
 
-".\python_embed\python.exe" "backend\run_all_tests.py"
+".\python_embed\python.exe" "tests\run_all_tests.py"
 
 if %ERRORLEVEL% neq 0 (
     echo.
