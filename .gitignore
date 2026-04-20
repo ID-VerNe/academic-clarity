@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+pnpm-lock.yaml
+
+# Build Outputs
+dist/
+dist-electron/
+*.exe
+*.blockmap
+
+# Python Environment (Large Binary)
+python_embed/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Database & Data
+*.db
+*.db-shm
+*.db-wal
+workspace/
+workspace_default/
+real_test_workspace/
+test_workspace_integration/
+backend/test_audit_temp.db
+
+# Logs & Temp
+logs/
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Environment
+.env
+.env.local

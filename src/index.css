@@ -1,0 +1,148 @@
+/* @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Source+Serif+Pro:ital,wght@0,400;0,600;0,700;1,400&display=swap'); */
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Source Serif Pro", serif;
+}
+
+@layer base {
+  body {
+    @apply antialiased text-slate-900 bg-slate-50;
+  }
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* --- Academic Table Styles --- */
+
+/* 通用表格基础 */
+.prose table {
+  @apply w-full border-collapse my-6 text-sm leading-relaxed;
+}
+
+.prose td, .prose th {
+  @apply p-3 text-left;
+}
+
+/* 1. 三线表 (Three-line table) */
+.table-style-three-line table {
+  border-top: 2px solid #1e293b;
+  border-bottom: 2px solid #1e293b;
+}
+
+.table-style-three-line thead tr:first-child,
+.table-style-three-line tr:first-child {
+  border-bottom: 1px solid #475569;
+  @apply font-bold text-slate-900 bg-slate-50/50;
+}
+
+.table-style-three-line tr {
+  border-bottom: none;
+}
+
+/* 2. 显示全部线 (Full lines) */
+.table-style-full-line table {
+  @apply border border-slate-300;
+}
+
+.table-style-full-line td, 
+.table-style-full-line th {
+  @apply border border-slate-200;
+}
+
+.table-style-full-line th {
+  @apply bg-slate-50 font-bold;
+}
+
+/* 3. 不显示线 (No lines) */
+.table-style-no-line table {
+  border: none;
+}
+
+.table-style-no-line tr {
+  @apply hover:bg-slate-50 transition-colors;
+}
+
+/* --- Paper Rendering Engine --- */
+
+.prose-academic {
+  @apply max-w-none font-serif text-slate-800 leading-[1.8] tracking-normal;
+  font-family: "Source Serif Pro", "Georgia", serif;
+}
+
+/* 标题美化: 自动居中并放大 */
+.prose-academic h1 {
+  @apply text-4xl font-extrabold text-slate-900 text-center mb-10 leading-tight mt-4 tracking-tight;
+}
+
+/* 章节标题: I. INTRODUCTION 风格 */
+.prose-academic h2 {
+  @apply text-xl font-bold text-slate-900 mt-12 mb-6 border-b border-slate-100 pb-2 uppercase tracking-wide;
+}
+
+.prose-academic h3 {
+  @apply text-lg font-bold text-slate-800 mt-8 mb-4 italic;
+}
+
+/* 段落优化: 两端对齐，首行微调 */
+.prose-academic p {
+  @apply text-justify mb-6 text-[17px];
+}
+
+/* 摘要块特化: 左右缩进并加框 */
+.prose-academic p:has(strong:contains("Abstract")),
+.prose-academic p:first-of-type {
+  @apply bg-slate-50/80 p-8 rounded-xl border-l-4 border-indigo-500 italic text-slate-700 my-10 shadow-sm text-[16px];
+}
+
+/* 列表美化 */
+.prose-academic ul, .prose-academic ol {
+  @apply my-8 space-y-3 pl-6;
+}
+
+.prose-academic li {
+  @apply relative pl-2;
+}
+
+/* 表格深度优化 */
+.prose-academic table {
+  @apply my-12 shadow-sm rounded-lg overflow-hidden border-hidden;
+}
+
+/* 三线表全局应用 */
+.table-style-three-line .prose-academic table {
+  @apply border-y-2 border-slate-900 shadow-none rounded-none;
+}
+
+.table-style-three-line .prose-academic thead tr,
+.table-style-three-line .prose-academic tr:first-child {
+  @apply border-b border-slate-400 bg-transparent font-bold text-slate-900;
+}
+
+.table-style-three-line .prose-academic td {
+  @apply border-none py-3;
+}
+
+/* 代码与公式块 */
+.prose-academic code {
+  @apply bg-slate-100 text-indigo-600 px-1.5 py-0.5 rounded text-[0.9em] font-mono;
+}
+
+.prose-academic blockquote {
+  @apply border-l-4 border-slate-200 pl-6 italic text-slate-500 my-8;
+}
