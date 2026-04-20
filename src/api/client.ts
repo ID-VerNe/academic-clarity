@@ -78,6 +78,12 @@ class ApiClient {
     return res.json();
   }
 
+  async reprocessDocument(docId: number) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/documents/${docId}/reprocess`, { method: 'POST' });
+    return res.json();
+  }
+
   async getPdfUrl(filename: string) {
     const baseUrl = await this.getBaseUrl();
     return `${baseUrl}/files/${encodeURIComponent(filename)}`;

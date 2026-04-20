@@ -8,8 +8,8 @@ import {
   Loader2,
   BookOpen,
   FolderOpen,
-  MoreVertical,
-  FileText
+  FileText,
+  RefreshCw
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -26,6 +26,7 @@ interface DashboardProps {
   onSelectDoc: (doc: Document) => void;
   onUpload: (file: File) => void;
   onDelete: (id: number) => void;
+  onReprocess: (id: number) => void;
   isUploading: boolean;
   key?: React.Key;
 }
@@ -35,6 +36,7 @@ export const Dashboard = ({
   onSelectDoc, 
   onUpload, 
   onDelete,
+  onReprocess,
   isUploading 
 }: DashboardProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -137,10 +139,22 @@ export const Dashboard = ({
                     <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border
                       ${doc.ocr_status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 
                         doc.ocr_status === 'processing' ? 'bg-amber-50 text-amber-700 border-amber-100 animate-pulse' : 
+                        doc.ocr_status === 'failed' ? 'bg-rose-50 text-rose-700 border-rose-100' :
                         'bg-slate-50 text-slate-500 border-slate-100'}`}>
                       {doc.ocr_status}
                     </div>
-                    {doc.ocr_status === 'processing' && <Loader2 className="w-3 h-3 text-amber-500 animate-spin" />}
+                    <div className="flex items-center gap-2">
+                       {doc.ocr_status === 'failed' && (
+                         <button 
+                           onClick={(e) => { e.stopPropagation(); onReprocess(doc.id); }}
+                           className="p-1 hover:bg-rose-100 rounded text-rose-600 transition-colors"
+                           title="Retry OCR"
+                         >
+                           <RefreshCw className="w-3 h-3" />
+                         </button>
+                       )}
+                       {doc.ocr_status === 'processing' && <Loader2 className="w-3 h-3 text-amber-500 animate-spin" />}
+                    </div>
                   </div>
                   
                   <h3 className="font-serif text-lg text-slate-800 leading-snug line-clamp-2 group-hover:text-indigo-600 transition-colors mb-2">

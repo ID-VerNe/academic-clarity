@@ -10,18 +10,25 @@ from services.config_service import ConfigService
 
 ocr_semaphore = asyncio.Semaphore(10)
 
-async def process_page_task(page_idx, total_pages, pix_data, api_config):
+async def process_page_task(page_idx, total_pages, pix_data, api_config, retries=3):
     """
-    Task for processing a single page of a PDF.
+    Task for processing a single page of a PDF with automatic retries.
     """
     async with ocr_semaphore:
-        print(f"[OCR] Processing Page {page_idx + 1}/{total_pages}...")
-        try:
-            image = Image.open(BytesIO(pix_data))
-            content = await call_ocr_api(image, api_config)
-            return content
-        except Exception as e:
-            return f"\n\n> [Error on Page {page_idx + 1}: {str(e)}]\n\n"
+        for attempt in range(retries):
+            print(f"[OCR] Processing Page {page_idx + 1}/{total_pages} (Attempt {attempt + 1})...")
+            try:
+                image = Image.open(BytesIO(pix_data))
+                content = await call_ocr_api(image, api_config)
+                return content
+            except Exception as e:
+                wait_time = (attempt + 1) * 2 # 指数退避
+                print(f"  [OCR] Page {page_idx + 1} failed: {e}. Retrying in {wait_time}s...")
+                if attempt < retries - 1:
+                    await asyncio.sleep(wait_time)
+                else:
+                    return f"\n\n> [Critical Error on Page {page_idx + 1} after {retries} retries: {str(e)}]\n\n"
+
 
 async def run_full_ocr_workflow(doc_id, pdf_path, db):
     """

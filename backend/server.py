@@ -143,6 +143,18 @@ async def delete_metadata_entry(metadata_id: int):
     db.delete_metadata(metadata_id)
     return {"success": True}
 
+@app.post("/documents/{doc_id}/reprocess")
+async def reprocess_document(doc_id: int, background_tasks: BackgroundTasks):
+    doc = db.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if not os.path.exists(doc['stored_path']):
+        raise HTTPException(status_code=400, detail="Physical file missing, cannot reprocess")
+
+    background_tasks.add_task(run_full_ocr_workflow, doc_id, doc['stored_path'], db)
+    return {"success": True}
+
 @app.post("/chat")
 async def chat_with_doc(request: ChatRequest):
     doc = db.get_document(request.doc_id)

@@ -125,6 +125,15 @@ export default function App() {
     (window as any).api.selectWorkspace();
   };
 
+  const handleReprocess = async (id: number) => {
+    try {
+      await api.reprocessDocument(id);
+      setRefreshTrigger(prev => prev + 1);
+    } catch (e) {
+      console.error('Reprocess failed:', e);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-x-hidden">
       <Header 
@@ -144,6 +153,7 @@ export default function App() {
             }}
             onUpload={handleUpload}
             onDelete={handleDelete}
+            onReprocess={handleReprocess}
             isUploading={isUploading}
           />
         ) : (
