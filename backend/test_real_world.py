@@ -61,12 +61,12 @@ async def run_real_integration_test():
         print(f"- Total Time: {duration:.2f} seconds")
 
         if doc['ocr_status'] == 'completed':
-            print("\n✅ ALL SYSTEMS GO: Real-world test passed.")
+            print("\n[SUCCESS] ALL SYSTEMS GO: Real-world test passed.")
         else:
-            print("\n❌ TEST FAILED: Workflow did not reach 'completed' state.")
+            print("\n[FAILURE] TEST FAILED: Workflow did not reach 'completed' state.")
 
     except Exception as e:
-        print(f"\n❌ CRITICAL ERROR during test: {e}")
+        print(f"\n[ERROR] CRITICAL ERROR during test: {e}")
 
 if __name__ == "__main__":
     asyncio.run(run_real_integration_test())

@@ -14,12 +14,14 @@ import { ReaderToolbar } from './reader/ReaderToolbar';
 import { PdfViewer } from './reader/PdfViewer';
 import { MarkdownViewer } from './reader/MarkdownViewer';
 import { ChatSidebar } from './reader/ChatSidebar';
+import { api } from '../api/client';
 
 interface Document {
   id: number;
   filename: string;
   title: string;
   authors: string;
+  ocr_status: 'pending' | 'processing' | 'completed' | 'failed';
   ocr_markdown?: string;
   metadata_json?: string;
   added_at: string;
@@ -41,13 +43,14 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string}[]>([]);
   const [isTyping, setIsTyping] = useState(false);
 
-import { api } from '../api/client';
-
-// ... inside Reader component ...
   useEffect(() => {
     const fetchPdfUrl = async () => {
-      const url = await api.getPdfUrl(doc.filename);
-      setPdfUrl(url);
+      try {
+        const url = await api.getPdfUrl(doc.filename);
+        setPdfUrl(url);
+      } catch (e) {
+        console.error('Failed to get PDF URL:', e);
+      }
     };
     fetchPdfUrl();
   }, [doc.id, doc.filename]);
