@@ -81,7 +81,11 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
       >
         <div className="p-4 border-b border-slate-200 flex items-center justify-between overflow-hidden text-slate-900">
           {!leftCollapsed && <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Structure</span>}
-          <button onClick={() => setLeftCollapsed(!leftCollapsed)} className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors">
+          <button 
+            aria-label="Toggle Left Sidebar"
+            onClick={() => setLeftCollapsed(!leftCollapsed)} 
+            className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"
+          >
             <ChevronRight className={`w-4 h-4 transition-transform ${leftCollapsed ? '' : 'rotate-180'}`} />
           </button>
         </div>

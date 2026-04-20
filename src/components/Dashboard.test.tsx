@@ -15,14 +15,43 @@ describe('Dashboard Component Behavioral Tests', () => {
     onReprocess: vi.fn(),
   };
 
-  it('triggers onSelectDoc when a completed card is clicked', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Mock window.api.selectWorkspace
+    (window as any).api = {
+      selectWorkspace: vi.fn(),
+    };
+  });
+
+  it('triggers onSelectDoc when a completed card body is clicked', () => {
     render(<Dashboard docs={mockDocs} {...mockHandlers} isUploading={false} />);
     
-    // 点击第一张卡片的标题区域
-    const title = screen.getByText('Paper One');
-    fireEvent.click(title);
+    // 点击卡片正文区域 (标题或文件名)
+    const cardTitle = screen.getByText('Paper One');
+    fireEvent.click(cardTitle);
     
     expect(mockHandlers.onSelectDoc).toHaveBeenCalledWith(mockDocs[0]);
+  });
+
+  it('triggers onSelectDoc when the Eye icon is clicked', () => {
+    render(<Dashboard docs={mockDocs} {...mockHandlers} isUploading={false} />);
+    
+    const eyeBtns = screen.getAllByRole('button').filter(btn => btn.querySelector('svg.lucide-eye'));
+    // The Dashboard component doesn't have aria-labels for all buttons, but Eye is one of them.
+    // Let's use the first eye icon button.
+    const eyeBtn = screen.getAllByRole('button').find(btn => btn.innerHTML.includes('lucide-eye'));
+    
+    fireEvent.click(eyeBtn!);
+    expect(mockHandlers.onSelectDoc).toHaveBeenCalled();
+  });
+
+  it('triggers window.api.selectWorkspace when the folder icon is clicked', () => {
+    render(<Dashboard docs={mockDocs} {...mockHandlers} isUploading={false} />);
+    
+    const switchBtn = screen.getByTitle('Switch Workspace');
+    fireEvent.click(switchBtn);
+    
+    expect((window as any).api.selectWorkspace).toHaveBeenCalled();
   });
 
   it('shows retry button and triggers onReprocess when ocr fails', () => {

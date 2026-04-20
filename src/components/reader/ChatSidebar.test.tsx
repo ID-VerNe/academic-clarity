@@ -1,6 +1,14 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, waitForElementToBeRemoved } from '@testing-library/react';
 import { ChatSidebar } from './ChatSidebar';
-import { vi, describe, it, expect } from 'vitest';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
+
+// Mock the API client
+vi.mock('../../api/client', () => ({
+  api: {
+    getMetadata: vi.fn().mockResolvedValue([]),
+    extractMetadata: vi.fn(),
+  }
+}));
 
 describe('ChatSidebar Behavioral Tests', () => {
   const mockHandlers = {
@@ -8,6 +16,10 @@ describe('ChatSidebar Behavioral Tests', () => {
     setChatQuery: vi.fn(),
     onSendMessage: vi.fn(),
   };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('toggles collapse state when chevron is clicked', () => {
     render(
@@ -47,7 +59,7 @@ describe('ChatSidebar Behavioral Tests', () => {
     expect(mockHandlers.onSendMessage).toHaveBeenCalled();
   });
 
-  it('shows extraction form when Plus button is clicked', () => {
+  it('shows extraction form when Plus button is clicked and closes when X is clicked', async () => {
     render(
       <ChatSidebar 
         docId={1} 
@@ -62,7 +74,51 @@ describe('ChatSidebar Behavioral Tests', () => {
     const plusBtn = screen.getByTitle('Extract New Perspective');
     fireEvent.click(plusBtn);
     
-    // 验证表单文本出现
-    expect(screen.getByText(/New Intelligence Dimension/i)).toBeDefined();
+    // Verify form text appears
+    const heading = screen.getByText(/New Intelligence Dimension/i);
+    expect(heading).toBeDefined();
+
+    // Click X button
+    const closeBtn = heading.previousElementSibling;
+    fireEvent.click(closeBtn!);
+
+    // Wait for form to be removed from DOM
+    await waitForElementToBeRemoved(() => screen.queryByText(/New Intelligence Dimension/i));
+  });
+
+  it('triggers setChatQuery when typing in the input', () => {
+    render(
+      <ChatSidebar 
+        docId={1} 
+        collapsed={false} 
+        chatHistory={[]} 
+        chatQuery="" 
+        isTyping={false} 
+        {...mockHandlers} 
+      />
+    );
+    
+    const input = screen.getByPlaceholderText(/Deep query document/i);
+    fireEvent.change(input, { target: { value: 'Hello' } });
+    
+    expect(mockHandlers.setChatQuery).toHaveBeenCalledWith('Hello');
+  });
+
+  it('triggers onSendMessage when Enter is pressed in the input', () => {
+    render(
+      <ChatSidebar 
+        docId={1} 
+        collapsed={false} 
+        chatHistory={[]} 
+        chatQuery="Some query" 
+        isTyping={false} 
+        {...mockHandlers} 
+      />
+    );
+    
+    const input = screen.getByPlaceholderText(/Deep query document/i);
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    
+    expect(mockHandlers.onSendMessage).toHaveBeenCalled();
   });
 });

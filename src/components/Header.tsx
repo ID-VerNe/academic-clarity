@@ -46,6 +46,7 @@ export const Header = ({ workspacePath, setView, onOpenSettings }: HeaderProps) 
       </button>
       <button 
         onClick={onOpenSettings}
+        aria-label="Open Settings"
         className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
       >
         <Settings className="w-5 h-5" />
