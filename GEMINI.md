@@ -28,3 +28,10 @@ Run `run_tests.bat` in the root directory. This script will:
 - **OCR Engine**: SiliconFlow (DeepSeek-OCR)
 - **Extraction Engine**: Local LLM (localhost:37210 / gpt-4.1)
 - **Database**: SQLite (WAL Mode enabled)
+
+## 5. Coding Standards (DRY & Modular)
+- **No Hardcoded API**: All frontend requests MUST use the unified `api` client (`src/api/client.ts`).
+- **Config Centralization**: Backend services MUST use `ConfigService` for database-backed settings.
+- **Single Responsibility**: Each file should have one clear purpose. If a file exceeds 200 lines, consider decomposing it into smaller "bricks".
+- **Rule of Three**: If you write the same logic three times, it MUST be extracted into a shared utility or component.
+

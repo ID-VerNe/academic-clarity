@@ -6,6 +6,8 @@ from io import BytesIO
 from services.ai_service import call_ocr_api, call_json_extraction_api
 from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown
 
+from services.config_service import ConfigService
+
 ocr_semaphore = asyncio.Semaphore(10)
 
 async def process_page_task(page_idx, total_pages, pix_data, api_config):
@@ -31,13 +33,10 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         doc = fitz.open(pdf_path)
         total_pages = len(doc)
         
-        api_config = {
-            "api_key": db.get_config("DEEPSEEK_API_KEY", ""),
-            "api_base": db.get_config("API_BASE", "https://api.siliconflow.cn/v1"),
-            "model_name": db.get_config("MODEL_NAME", "openai/deepseek-ai/DeepSeek-OCR")
-        }
+        config_service = ConfigService(db)
+        ocr_api_config = config_service.get_ocr_config()
 
-        if not api_config["api_key"]:
+        if not ocr_api_config["api_key"]:
             print("[Task] Error: DEEPSEEK_API_KEY not found in configs.")
             db.update_document_ocr(doc_id, "failed")
             return
@@ -45,7 +44,7 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         page_tasks = []
         for i in range(total_pages):
             pix = doc[i].get_pixmap(dpi=144)
-            page_tasks.append(process_page_task(i, total_pages, pix.tobytes("png"), api_config))
+            page_tasks.append(process_page_task(i, total_pages, pix.tobytes("png"), ocr_api_config))
         
         page_results = await asyncio.gather(*page_tasks)
         doc.close()
@@ -58,12 +57,7 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         print(f"[Task] Extracting JSON metadata for: {title}")
         metadata_prompt = db.get_config("METADATA_EXTRACT_PROMPT", "Extract metadata from this academic paper. Return a JSON object with keys: title, authors, abstract, keywords, publication_date.")
         
-        # 配置 JSON 提取专用的引擎 (默认指向本地 gpt-4.1)
-        extract_api_config = {
-            "api_key": db.get_config("EXTRACT_API_KEY", "sk-copilot-sdk-default"),
-            "api_base": db.get_config("EXTRACT_API_BASE", "http://localhost:37210/v1"),
-            "model_name": db.get_config("EXTRACT_MODEL_NAME", "gpt-4.1")
-        }
+        extract_api_config = config_service.get_extract_config()
         
         metadata_json = "{}"
         try:

@@ -4,6 +4,7 @@ import { Header } from './components/Header';
 import { Dashboard } from './components/Dashboard';
 import { Reader } from './components/Reader';
 import { SettingsModal } from './components/SettingsModal';
+import { api } from './api/client';
 
 // --- Types ---
 
@@ -16,6 +17,7 @@ interface Document {
   authors: string;
   ocr_status: 'pending' | 'processing' | 'completed' | 'failed';
   ocr_markdown?: string;
+  metadata_json?: string;
   added_at: string;
 }
 
@@ -23,6 +25,7 @@ interface AppConfig {
   DEEPSEEK_API_KEY: string;
   API_BASE: string;
   WORKSPACE_PATH: string;
+  TABLE_STYLE?: string;
 }
 
 export default function App() {
@@ -34,25 +37,15 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // 获取后端 URL
-  const getUrl = async (path: string) => {
-    const port = await (window as any).api.getPythonPort();
-    return `http://127.0.0.1:${port}${path}`;
-  };
-
   // 数据加载逻辑
   const fetchData = async () => {
     try {
-      const port = await (window as any).api.getPythonPort();
-      if (!port) return;
-
-      const [configRes, docsRes] = await Promise.all([
-        fetch(`http://127.0.0.1:${port}/configs`),
-        fetch(`http://127.0.0.1:${port}/documents`)
+      const [configData, docsData] = await Promise.all([
+        api.getConfigs(),
+        api.getDocuments()
       ]);
-
-      if (configRes.ok) setConfig(await configRes.json());
-      if (docsRes.ok) setDocs(await docsRes.json());
+      setConfig(configData);
+      setDocs(docsData);
     } catch (e) {
       console.error('Fetch error:', e);
     }
@@ -72,7 +65,7 @@ export default function App() {
     return () => cleanup();
   }, []);
 
-  // 针对正在 OCR 的文档进行短时轮询 (可选)
+  // 针对正在 OCR 的文档进行短时轮询
   useEffect(() => {
     const hasProcessing = docs.some(d => d.ocr_status === 'processing' || d.ocr_status === 'pending');
     if (hasProcessing) {
@@ -84,12 +77,8 @@ export default function App() {
   const handleUpload = async (file: File) => {
     setIsUploading(true);
     try {
-      const url = await getUrl('/documents/add');
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const res = await fetch(url, { method: 'POST', body: formData });
-      if (res.ok) setRefreshTrigger(prev => prev + 1);
+      const res = await api.uploadDocument(file);
+      if (res.success) setRefreshTrigger(prev => prev + 1);
     } catch (e) {
       console.error('Upload failed:', e);
     } finally {
@@ -100,9 +89,8 @@ export default function App() {
   const handleDelete = async (id: number) => {
     if (!confirm('Are you sure you want to delete this document?')) return;
     try {
-      const url = await getUrl(`/documents/${id}`);
-      const res = await fetch(url, { method: 'DELETE' });
-      if (res.ok) setRefreshTrigger(prev => prev + 1);
+      const res = await api.deleteDocument(id);
+      if (res.success) setRefreshTrigger(prev => prev + 1);
     } catch (e) {
       console.error('Delete failed:', e);
     }
@@ -110,8 +98,7 @@ export default function App() {
 
   const saveConfig = async (key: string, value: string) => {
     try {
-      const url = await getUrl(`/configs?key=${key}&value=${encodeURIComponent(value)}`);
-      await fetch(url, { method: 'POST' });
+      await api.setConfig(key, value);
       setRefreshTrigger(prev => prev + 1);
     } catch (e) {
       console.error('Save config failed:', e);

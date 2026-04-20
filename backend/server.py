@@ -108,14 +108,14 @@ async def chat_with_doc(request: ChatRequest):
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
+from services.config_service import ConfigService
+
+# ... inside chat_with_doc ...
     if not doc.get('ocr_markdown'):
         return {"response": "I cannot answer questions about this document yet because OCR has not been completed."}
 
-    api_config = {
-        "api_key": db.get_config("DEEPSEEK_API_KEY", ""),
-        "api_base": db.get_config("API_BASE", "https://api.siliconflow.cn/v1"),
-        "model_name": "deepseek-ai/DeepSeek-V3"
-    }
+    config_service = ConfigService(db)
+    api_config = config_service.get_chat_config()
 
     if not api_config["api_key"]:
         return {"response": "Error: DEEPSEEK_API_KEY is not configured in Settings."}

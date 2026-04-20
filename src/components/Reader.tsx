@@ -41,11 +41,13 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string}[]>([]);
   const [isTyping, setIsTyping] = useState(false);
 
+import { api } from '../api/client';
+
+// ... inside Reader component ...
   useEffect(() => {
     const fetchPdfUrl = async () => {
-      const port = await (window as any).api.getPythonPort();
-      const encodedFilename = encodeURIComponent(doc.filename);
-      setPdfUrl(`http://127.0.0.1:${port}/files/${encodedFilename}`);
+      const url = await api.getPdfUrl(doc.filename);
+      setPdfUrl(url);
     };
     fetchPdfUrl();
   }, [doc.id, doc.filename]);
@@ -59,18 +61,8 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
     setIsTyping(true);
 
     try {
-      const port = await (window as any).api.getPythonPort();
-      const res = await fetch(`http://127.0.0.1:${port}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          doc_id: doc.id,
-          query: userMsg
-        })
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
+      const data = await api.chat(doc.id, userMsg);
+      if (data.response) {
         setChatHistory(prev => [...prev, { role: 'ai', content: data.response }]);
       } else {
         setChatHistory(prev => [...prev, { role: 'ai', content: 'Error: Failed to get response from AI.' }]);
