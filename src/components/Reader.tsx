@@ -16,16 +16,7 @@ import { MarkdownViewer } from './reader/MarkdownViewer';
 import { ChatSidebar } from './reader/ChatSidebar';
 import { api } from '../api/client';
 
-interface Document {
-  id: number;
-  filename: string;
-  title: string;
-  authors: string;
-  ocr_status: 'pending' | 'processing' | 'completed' | 'failed';
-  ocr_markdown?: string;
-  metadata_json?: string;
-  added_at: string;
-}
+import { Document } from '../types';
 
 interface ReaderProps {
   doc: Document;

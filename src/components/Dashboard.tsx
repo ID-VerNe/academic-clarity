@@ -13,13 +13,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
-interface Document {
-  id: number;
-  filename: string;
-  title: string;
-  ocr_status: 'pending' | 'processing' | 'completed' | 'failed';
-  added_at: string;
-}
+import { Document } from '../types';
 
 interface DashboardProps {
   docs: Document[];

@@ -1,24 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  X, 
-  Key, 
-  FolderOpen,
-  Layout
-} from 'lucide-react';
-import { motion } from 'motion/react';
-
-interface AppConfig {
-  DEEPSEEK_API_KEY: string;
-  API_BASE: string;
-  WORKSPACE_PATH: string;
-  TABLE_STYLE?: 'three-line' | 'full-line' | 'no-line';
-}
+import React from 'react';
+import { X, Settings, Database, Server, Cpu, FolderOpen, Save } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { AppConfig } from '../types';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   config: AppConfig | null;
-  onSaveConfig: (key: string, value: string) => Promise<void>;
+  onSaveConfig: (key: string, value: string) => void;
   onSelectWorkspace: () => void;
 }
 
@@ -29,108 +18,113 @@ export const SettingsModal = ({
   onSaveConfig,
   onSelectWorkspace 
 }: SettingsModalProps) => {
-  const [apiKey, setApiKey] = useState(config?.DEEPSEEK_API_KEY || '');
-  const currentTableStyle = config?.TABLE_STYLE || 'three-line';
-  
-  useEffect(() => {
-    if (config) setApiKey(config.DEEPSEEK_API_KEY);
-  }, [config]);
-
   if (!isOpen) return null;
 
-  const tableStyles = [
-    { id: 'three-line', label: '三线表' },
-    { id: 'full-line', label: '全边框' },
-    { id: 'no-line', label: '不显示' }
-  ];
-
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
-      >
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-bold text-lg text-slate-900">Application Settings</h3>
-          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+    <AnimatePresence>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+          className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+        />
         
-        <div className="p-6 space-y-6">
-          {/* API Key */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              <Key className="w-3 h-3" /> DeepSeek API Key
-            </label>
-            <div className="flex gap-2">
-              <input 
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="flex-1 h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
-                placeholder="sk-..."
-              />
-              <button 
-                onClick={() => onSaveConfig('DEEPSEEK_API_KEY', apiKey)}
-                className="px-4 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors"
-              >
-                Save
-              </button>
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 20 }}
+          className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200"
+        >
+          {/* Header */}
+          <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-indigo-600 rounded-xl">
+                <Settings className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">System Preferences</h2>
+                <p className="text-xs text-slate-400 font-medium">Configure AI engines and research environment</p>
+              </div>
             </div>
+            <button 
+              onClick={onClose}
+              className="p-2 hover:bg-slate-200 rounded-full text-slate-400 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          {/* Table Style Selection */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              <Layout className="w-3 h-3" /> Table Render Style
-            </label>
-            <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200">
-              {tableStyles.map((style) => (
-                <button
-                  key={style.id}
-                  onClick={() => onSaveConfig('TABLE_STYLE', style.id)}
-                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
-                    currentTableStyle === style.id 
-                      ? 'bg-white text-indigo-600 shadow-sm border border-slate-200/50' 
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  {style.label}
-                </button>
-              ))}
-            </div>
+          <div className="p-8 space-y-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
+            {/* Workspace Section */}
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 text-slate-900">
+                <Database className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-bold uppercase tracking-widest">Environment</h3>
+              </div>
+              <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Active Workspace</label>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs font-mono text-slate-600 truncate shadow-sm">
+                    {config?.WORKSPACE_PATH || 'Not selected'}
+                  </div>
+                  <button 
+                    onClick={onSelectWorkspace}
+                    className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50 transition-all shadow-sm active:scale-95"
+                  >
+                    <FolderOpen className="w-4 h-4 text-indigo-600" />
+                    Switch
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* AI Engines Section */}
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 text-slate-900">
+                <Cpu className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-bold uppercase tracking-widest">AI Intelligence</h3>
+              </div>
+              
+              <div className="grid gap-6">
+                <div className="space-y-3">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">SiliconFlow API Key (OCR)</label>
+                  <input 
+                    type="password"
+                    defaultValue={config?.DEEPSEEK_API_KEY}
+                    onBlur={(e) => onSaveConfig('DEEPSEEK_API_KEY', e.target.value)}
+                    placeholder="sk-..."
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm"
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Extraction Engine Base URL</label>
+                  <input 
+                    type="text"
+                    defaultValue={config?.API_BASE}
+                    onBlur={(e) => onSaveConfig('API_BASE', e.target.value)}
+                    placeholder="http://localhost:37210/v1"
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm"
+                  />
+                </div>
+              </div>
+            </section>
           </div>
 
-          {/* Workspace */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              <FolderOpen className="w-3 h-3" /> Workspace
-            </label>
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-              <p className="text-xs text-slate-600 break-all leading-relaxed">
-                {config?.WORKSPACE_PATH}
-              </p>
-              <button 
-                onClick={onSelectWorkspace}
-                className="w-full py-2 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
-              >
-                Change Workspace Directory
-              </button>
-            </div>
+          {/* Footer */}
+          <div className="px-8 py-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+            <button 
+              onClick={onClose}
+              className="flex items-center gap-2 px-8 py-3 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition-all active:scale-95"
+            >
+              <Save className="w-4 h-4" />
+              Done
+            </button>
           </div>
-        </div>
-        
-        <div className="p-6 bg-slate-50 text-center border-t border-slate-100">
-          <button 
-            onClick={onClose}
-            className="text-sm font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
-          >
-            Done
-          </button>
-        </div>
-      </motion.div>
-    </div>
+        </motion.div>
+      </div>
+    </AnimatePresence>
   );
 };

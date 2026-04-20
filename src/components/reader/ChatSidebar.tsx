@@ -78,13 +78,18 @@ export const ChatSidebar = ({
       {/* Header */}
       <div className="p-4 border-b border-slate-200 flex items-center justify-between overflow-hidden bg-white/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="flex items-center">
-          <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors">
+          <button 
+            aria-label="Toggle Sidebar"
+            onClick={() => setCollapsed(!collapsed)} 
+            className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"
+          >
             <ChevronRight className={`w-4 h-4 transition-transform ${collapsed ? 'rotate-180' : ''}`} />
           </button>
           {!collapsed && <span className="ml-3 text-[10px] font-black uppercase tracking-widest text-slate-500">Academic Insight Hub</span>}
         </div>
         {!collapsed && (
           <button 
+            aria-label="New Perspective"
             onClick={() => setShowExtractForm(true)}
             className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors border border-indigo-100"
             title="Extract New Perspective"
@@ -101,8 +106,6 @@ export const ChatSidebar = ({
         </div>
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden">
-          
-          {/* Metadata Section */}
           <div className="p-4 overflow-y-auto max-h-[50%] bg-slate-100/30 border-b border-slate-200 custom-scrollbar">
             <AnimatePresence>
                {showExtractForm && (
@@ -147,7 +150,6 @@ export const ChatSidebar = ({
             </div>
           </div>
 
-          {/* Chat Section */}
           <div className="flex-1 flex flex-col overflow-hidden bg-white">
             <div className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth custom-scrollbar">
                {chatHistory.length === 0 ? (
@@ -179,7 +181,6 @@ export const ChatSidebar = ({
                )}
             </div>
 
-            {/* Input Area */}
             <div className="p-4 border-t border-slate-100 bg-white">
                <div className="relative flex items-center gap-2">
                   <input 
@@ -191,6 +192,7 @@ export const ChatSidebar = ({
                     type="text" 
                   />
                   <button 
+                    aria-label="Send Message"
                     onClick={onSendMessage}
                     disabled={isTyping || !chatQuery.trim()}
                     className="absolute right-2 p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:bg-slate-300 transition-all shadow-lg shadow-indigo-100 active:scale-95"

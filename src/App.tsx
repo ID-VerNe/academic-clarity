@@ -5,28 +5,7 @@ import { Dashboard } from './components/Dashboard';
 import { Reader } from './components/Reader';
 import { SettingsModal } from './components/SettingsModal';
 import { api } from './api/client';
-
-// --- Types ---
-
-type View = 'dashboard' | 'reader';
-
-interface Document {
-  id: number;
-  filename: string;
-  title: string;
-  authors: string;
-  ocr_status: 'pending' | 'processing' | 'completed' | 'failed';
-  ocr_markdown?: string;
-  metadata_json?: string;
-  added_at: string;
-}
-
-interface AppConfig {
-  DEEPSEEK_API_KEY: string;
-  API_BASE: string;
-  WORKSPACE_PATH: string;
-  TABLE_STYLE?: string;
-}
+import { Document, AppConfig, View } from './types';
 
 export default function App() {
   const [view, setView] = useState<View>('dashboard');
@@ -112,6 +91,15 @@ export default function App() {
     }
   };
 
+  const handleReprocess = async (id: number) => {
+    try {
+      await api.reprocessDocument(id);
+      setRefreshTrigger(prev => prev + 1);
+    } catch (e) {
+      console.error('Reprocess failed:', e);
+    }
+  };
+
   const saveConfig = async (key: string, value: string) => {
     try {
       await api.setConfig(key, value);
@@ -123,15 +111,6 @@ export default function App() {
 
   const handleSelectWorkspace = () => {
     (window as any).api.selectWorkspace();
-  };
-
-  const handleReprocess = async (id: number) => {
-    try {
-      await api.reprocessDocument(id);
-      setRefreshTrigger(prev => prev + 1);
-    } catch (e) {
-      console.error('Reprocess failed:', e);
-    }
   };
 
   return (
