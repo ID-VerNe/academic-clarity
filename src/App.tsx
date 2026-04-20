@@ -51,16 +51,32 @@ export default function App() {
     }
   };
 
+  // 数据同步逻辑
+  const handleSync = async () => {
+    try {
+      await api.syncWorkspace();
+      setRefreshTrigger(prev => prev + 1);
+    } catch (e) {
+      console.error('Sync failed:', e);
+    }
+  };
+
   // 初始化获取数据及响应触发器刷新
   useEffect(() => {
     fetchData();
   }, [refreshTrigger]);
 
+  // 启动时自动同步
+  useEffect(() => {
+    handleSync();
+  }, []);
+
   // 监听工作区切换
   useEffect(() => {
     const cleanup = (window as any).api.onWorkspaceChanged((newPath: string) => {
       console.log('Workspace changed via Electron:', newPath);
-      setRefreshTrigger(prev => prev + 1);
+      // 切换工作区后立即同步
+      handleSync();
     });
     return () => cleanup();
   }, []);

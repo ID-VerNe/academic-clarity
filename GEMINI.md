@@ -17,21 +17,19 @@ We use a layered testing strategy to ensure robustness:
 | **Integration**| Real API Test | `.\python_embed\python.exe backend/test_real_world.py` | OCR -> JSON -> DB Full Cycle |
 | **Build** | Vite/TSC | `pnpm build` | TS Types, Frontend bundling |
 
-## 3. The One-Click Test Suite
-Run `run_tests.bat` in the root directory. This script will:
-1. Verify TypeScript types (`tsc`).
-2. Run all backend unit and security tests.
-3. Run a mocked integration test (to save API credits).
-4. **Exit with Error** if any step fails.
+## 3. High-Performance Testing (Parallel & Isolated)
+Run `run_tests.bat` in the root directory. 
+- **Isolation**: Each test process automatically creates a unique, UUID-based temporary database and workspace. 
+- **Concurrency**: Tests run in parallel using multiple CPU cores to maximize speed.
+- **Auto-Cleanup**: All temporary artifacts (test databases, temp folders) are physically deleted immediately after completion, regardless of the test outcome.
 
-## 4. Environment Constants
-- **OCR Engine**: SiliconFlow (DeepSeek-OCR)
-- **Extraction Engine**: Local LLM (localhost:37210 / gpt-4.1)
-- **Database**: SQLite (WAL Mode enabled)
+## 4. Multi-Dimensional Knowledge Graph (Intelligence Insight)
+- **Modular Metadata**: Documents support multiple JSON metadata sets (e.g., Basic Insight, Experimental Analysis).
+- **Default Extraction**: Every OCR task MUST automatically trigger a "Basic Insight" extraction covering: Title, Authors, Journal, Date, DOI, Abstract, Keywords, and Summary.
+- **Dynamic Extension**: The UI allows users to trigger new extraction dimensions using custom labels and prompts.
 
 ## 5. Coding Standards (DRY & Modular)
 - **No Hardcoded API**: All frontend requests MUST use the unified `api` client (`src/api/client.ts`).
 - **Config Centralization**: Backend services MUST use `ConfigService` for database-backed settings.
-- **Single Responsibility**: Each file should have one clear purpose. If a file exceeds 200 lines, consider decomposing it into smaller "bricks".
-- **Rule of Three**: If you write the same logic three times, it MUST be extracted into a shared utility or component.
-
+- **Single Responsibility**: Each file should have one clear purpose. If a file exceeds 200 lines, decompose it into smaller "bricks".
+- **Recursive Rendering**: UI components handling LLM JSON must use recursive rendering with a depth limit (max 5 levels) to ensure stability.

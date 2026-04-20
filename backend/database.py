@@ -42,14 +42,38 @@ class Database:
                 )
             ''')
             
-            # 兼容性升级
-            cursor.execute("PRAGMA table_info(documents)")
-            columns = [column[1] for column in cursor.fetchall()]
-            if 'ocr_raw' not in columns:
-                cursor.execute("ALTER TABLE documents ADD COLUMN ocr_raw TEXT")
-            if 'metadata_json' not in columns:
-                cursor.execute("ALTER TABLE documents ADD COLUMN metadata_json TEXT")
-                
+            # 兼容性升级: 创建多维元数据表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS document_metadata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id INTEGER,
+                    label TEXT,
+                    content_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (doc_id) REFERENCES documents (id)
+                )
+            ''')
+            conn.commit()
+
+    def add_document_metadata(self, doc_id, label, content_json):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO document_metadata (doc_id, label, content_json) VALUES (?, ?, ?)',
+                         (doc_id, label, content_json))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_document_metadata(self, doc_id):
+        with self.get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM document_metadata WHERE doc_id = ? ORDER BY created_at DESC', (doc_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def delete_metadata(self, metadata_id):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM document_metadata WHERE id = ?', (metadata_id,))
             conn.commit()
 
     def get_config(self, key, default=None):

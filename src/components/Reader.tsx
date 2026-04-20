@@ -158,6 +158,7 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
       </section>
 
       <ChatSidebar 
+        docId={doc.id}
         collapsed={rightCollapsed}
         setCollapsed={setRightCollapsed}
         chatHistory={chatHistory}
@@ -165,7 +166,6 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
         setChatQuery={setChatQuery}
         isTyping={isTyping}
         onSendMessage={handleSendMessage}
-        metadataJson={doc.metadata_json}
       />
     </motion.div>
   );

@@ -53,19 +53,43 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         cleaned_markdown = clean_ocr_markdown(raw_full_content)
         title = extract_title_from_markdown(raw_full_content)
         
-        # --- 阶段 2: 结构化 JSON 提取 ---
-        print(f"[Task] Extracting JSON metadata for: {title}")
-        metadata_prompt = db.get_config("METADATA_EXTRACT_PROMPT", "Extract metadata from this academic paper. Return a JSON object with keys: title, authors, abstract, keywords, publication_date.")
+        # --- 阶段 2: 结构化 JSON 提取 (多维智库卡片) ---
+        print(f"[Task] Extracting DEFAULT metadata for: {title}")
         
+        # 1. 定义基础信息提取 Prompt (Default Tags)
+        default_prompt = """
+        Extract the following basic metadata from this academic paper markdown content. 
+        Return a JSON object with these EXACT keys:
+        - title: The full title of the paper
+        - authors: A list of all authors
+        - journal_or_conference: Where it was published
+        - date: Publication date (if available)
+        - doi: DOI string
+        - abstract: A concise 2-3 sentence summary of the abstract
+        - keywords: A list of 5-8 key terms
+        - summary: A 3-bullet point summary of 'what this paper wrote about/contributed'
+        """
+        
+        config_service = ConfigService(db)
         extract_api_config = config_service.get_extract_config()
         
-        metadata_json = "{}"
         try:
-            metadata_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, metadata_prompt)
+            # 提取基础信息
+            metadata_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, default_prompt)
+            # 存入多维元数据表
+            db.add_document_metadata(doc_id, "Basic Insight", metadata_json)
         except Exception as e:
-            print(f"[Task] JSON Extraction Error: {e}")
+            print(f"[Task] Default Metadata Extraction Error: {e}")
 
-        db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, raw=raw_full_content, title=title, metadata_json=metadata_json)
+        # 检查是否还有用户自定义的额外提取需求 (可选扩展点)
+        user_custom_prompt = db.get_config("CUSTOM_EXTRACT_PROMPT")
+        if user_custom_prompt:
+            try:
+                custom_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, user_custom_prompt)
+                db.add_document_metadata(doc_id, "Custom Analysis", custom_json)
+            except: pass
+
+        db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, raw=raw_full_content, title=title)
         print(f"[Task] Finished: {title}")
     except Exception as e:
         print(f"[Task] Error: {e}")

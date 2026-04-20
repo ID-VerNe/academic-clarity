@@ -17,6 +17,8 @@ from database import Database
 from services.ocr_service import run_full_ocr_workflow
 from services.ai_service import call_chat_api
 from utils.security import secure_filename
+from services.config_service import ConfigService
+from services.workspace_service import WorkspaceService
 
 # --- Workspace & DB Initialization ---
 WORKSPACE_PATH = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(BASE_DIR), "workspace_default")
@@ -25,6 +27,10 @@ if not os.path.exists(WORKSPACE_PATH):
 
 DB_PATH = os.path.join(WORKSPACE_PATH, "library.db")
 db = Database(DB_PATH)
+
+# --- Auto Sync on Startup ---
+workspace_service = WorkspaceService(WORKSPACE_PATH, db)
+workspace_service.scan_and_sync()
 
 # --- App Initialization ---
 app = FastAPI(title="Academic Clarity Backend")
@@ -44,11 +50,20 @@ class ChatRequest(BaseModel):
     doc_id: int
     query: str
 
+class MetadataRequest(BaseModel):
+    label: str
+    prompt: str
+
 # --- API Endpoints ---
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "workspace": WORKSPACE_PATH}
+
+@app.post("/workspace/sync")
+async def sync_workspace():
+    results = workspace_service.scan_and_sync()
+    return {"success": True, "results": results}
 
 @app.get("/configs")
 async def get_configs():
@@ -102,15 +117,38 @@ async def delete_document(doc_id: int):
         return {"success": True}
     return {"success": False}
 
+@app.get("/documents/{doc_id}/metadata")
+async def get_document_metadata_list(doc_id: int):
+    return db.get_document_metadata(doc_id)
+
+@app.post("/documents/{doc_id}/metadata/extract")
+async def trigger_custom_extraction(doc_id: int, request: MetadataRequest):
+    doc = db.get_document(doc_id)
+    if not doc or not doc.get('ocr_markdown'):
+        raise HTTPException(status_code=400, detail="OCR not completed yet")
+    
+    config_service = ConfigService(db)
+    extract_api_config = config_service.get_extract_config()
+    
+    try:
+        from services.ai_service import call_json_extraction_api
+        metadata_json = await call_json_extraction_api(doc['ocr_markdown'], extract_api_config, request.prompt)
+        db.add_document_metadata(doc_id, request.label, metadata_json)
+        return {"success": True, "label": request.label}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/metadata/{metadata_id}")
+async def delete_metadata_entry(metadata_id: int):
+    db.delete_metadata(metadata_id)
+    return {"success": True}
+
 @app.post("/chat")
 async def chat_with_doc(request: ChatRequest):
     doc = db.get_document(request.doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
-from services.config_service import ConfigService
-
-# ... inside chat_with_doc ...
     if not doc.get('ocr_markdown'):
         return {"response": "I cannot answer questions about this document yet because OCR has not been completed."}
 

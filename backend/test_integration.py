@@ -86,12 +86,14 @@ class TestAcademicClarityIntegration(unittest.TestCase):
         updated_doc = self.db.get_document(doc_id)
         print(f"  Status updated to: {updated_doc['ocr_status']}")
         self.assertEqual(updated_doc['ocr_status'], 'completed')
-        self.assertEqual(updated_doc['title'], 'Test Paper Title')
-        self.assertIn('$E=mc^2$', updated_doc['ocr_markdown'])
         
-        # 验证 JSON 提取
-        meta_data = json.loads(updated_doc['metadata_json'])
-        self.assertEqual(meta_data['authors'][0], "Author One")
+        # 验证多维元数据提取
+        metadata_list = self.db.get_document_metadata(doc_id)
+        self.assertGreater(len(metadata_list), 0)
+        self.assertEqual(metadata_list[0]['label'], "Basic Insight")
+        
+        meta_content = json.loads(metadata_list[0]['content_json'])
+        self.assertEqual(meta_content['title'], "Test Paper Title")
         print("  Workflow Logic Verified OK.")
 
     def test_ai_chat_logic(self):

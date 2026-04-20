@@ -9,6 +9,12 @@ class ApiClient {
     return `http://127.0.0.1:${port}`;
   }
 
+  async syncWorkspace() {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/workspace/sync`, { method: 'POST' });
+    return res.json();
+  }
+
   async getConfigs() {
     const baseUrl = await this.getBaseUrl();
     const res = await fetch(`${baseUrl}/configs`);
@@ -47,6 +53,28 @@ class ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ doc_id: docId, query })
     });
+    return res.json();
+  }
+
+  async getMetadata(docId: number) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/documents/${docId}/metadata`);
+    return res.json();
+  }
+
+  async extractMetadata(docId: number, label: string, prompt: string) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/documents/${docId}/metadata/extract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, prompt })
+    });
+    return res.json();
+  }
+
+  async deleteMetadata(metadataId: number) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/metadata/${metadataId}`, { method: 'DELETE' });
     return res.json();
   }
 
