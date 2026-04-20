@@ -2,12 +2,14 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { SettingsModal } from './SettingsModal';
 import { vi, describe, it, expect } from 'vitest';
 import React from 'react';
+import { AppConfig } from '../types';
 
 describe('SettingsModal Component', () => {
-  const mockConfig = {
+  const mockConfig: AppConfig = {
     WORKSPACE_PATH: '/test/path',
     DEEPSEEK_API_KEY: 'test-key',
-    API_BASE: 'http://localhost:1234'
+    API_BASE: 'http://localhost:1234',
+    TABLE_STYLE: 'three-line'
   };
 
   const mockHandlers = {
@@ -68,15 +70,7 @@ describe('SettingsModal Component', () => {
       />
     );
     
-    // Find the X button (it has lucide-x)
-    // Actually it's better to find it by some identifier if possible, 
-    // but looking at SettingsModal.tsx:
-    // <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full text-slate-400 transition-colors">
-    //   <X className="w-5 h-5" />
-    // </button>
-    // I can find it by getting the button that contains X
     const closeBtns = screen.getAllByRole('button');
-    // The first one in the header should be the X button
     fireEvent.click(closeBtns[0]); 
     expect(mockHandlers.onClose).toHaveBeenCalled();
   });

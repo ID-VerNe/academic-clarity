@@ -34,4 +34,10 @@ Run `run_tests.bat` in the root directory.
 - **No Hardcoded API**: All frontend requests MUST use the unified `api` client (`src/api/client.ts`).
 - **Config Centralization**: Backend services MUST use `ConfigService` for database-backed settings.
 - **Single Responsibility**: Each file should have one clear purpose. If a file exceeds 200 lines, decompose it into smaller "bricks".
-- **Recursive Rendering**: UI components handling LLM JSON must use recursive rendering with a depth limit (max 5 levels) to ensure stability.
+- **Recursive Rendering**: UI components handling LLM JSON must use recursive rendering with a depth limit (max 5 levels).
+
+## 6. Testing & Quality Assurance Mandates
+- **Exhaustive UI Testing**: 100% of defined event handlers (`onClick`, `onChange`, `onBlur`, `onKeyDown`, etc.) MUST be covered by Vitest/RTL tests. No interactive element is considered "finished" without a behavioral test.
+- **Regression Prevention**: Any bug fixed MUST be accompanied by a new test case in the `tests/` or `src/**/*.test.tsx` files.
+- **Parallel Priority**: All new tests MUST be designed to run in parallel without resource conflicts (using unique UUID-based temp data).
+

@@ -14,13 +14,14 @@ vi.mock('../api/client', () => ({
 }));
 
 describe('Reader Component', () => {
-  const mockDoc = {
+  const mockDoc: any = {
     id: 1,
-    title: 'Test Document',
+    title: 'Test Paper',
     filename: 'test.pdf',
-    ocr_markdown: '# Test Content',
+    authors: 'John Doe',
+    ocr_markdown: '# Content',
     ocr_status: 'completed',
-    added_at: new Date().toISOString(),
+    added_at: new Date().toISOString()
   };
 
   const mockProps = {
