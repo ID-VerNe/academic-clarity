@@ -179,6 +179,7 @@ export const Dashboard = ({
                     <button 
                       onClick={(e) => { e.stopPropagation(); onDelete(doc.id); }}
                       className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all duration-200 opacity-0 group-hover:opacity-100"
+                      title="Delete Document"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>

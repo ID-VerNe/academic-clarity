@@ -45,4 +45,14 @@ describe('Dashboard Component Behavioral Tests', () => {
     // 注意：由于无法模拟原生文件对话框，我们验证 click 事件是否冒泡到了 input
     // 但在 React 测试中，我们可以确保 onUpload 能被 handleFileChange 触发
   });
+
+  it('triggers onDelete when clicking the trash icon', () => {
+    render(<Dashboard docs={mockDocs} {...mockHandlers} isUploading={false} />);
+
+    // Find trash buttons by title
+    const trashBtns = screen.getAllByTitle('Delete Document');
+
+    fireEvent.click(trashBtns[0]);
+    expect(mockHandlers.onDelete).toHaveBeenCalledWith(mockDocs[0].id);
+  });
 });
