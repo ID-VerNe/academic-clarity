@@ -126,13 +126,13 @@ export const Dashboard = ({
               <motion.div 
                 key={doc.id}
                 whileHover={{ y: -4, boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                className={`bg-white border border-slate-200/60 rounded-3xl p-6 flex flex-col justify-between hover:border-indigo-200 transition-all duration-300 group relative overflow-hidden
-                  ${doc.ocr_status !== 'completed' ? 'opacity-80 cursor-wait' : 'cursor-pointer shadow-sm'}`}
+                className={`bg-white border border-slate-200/60 rounded-3xl p-6 flex flex-col justify-between hover:border-indigo-200 transition-all duration-300 group relative overflow-hidden cursor-pointer shadow-sm
+                  ${doc.ocr_status !== 'completed' ? 'opacity-90' : ''}`}
               >
                 <div className={`absolute top-0 left-0 w-full h-1 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500
                   ${doc.ocr_status === 'completed' ? 'bg-indigo-500' : 'bg-amber-400'}`} />
                 
-                <div onClick={() => doc.ocr_status === 'completed' && onSelectDoc(doc)}>
+                <div onClick={() => onSelectDoc(doc)}>
                   <div className="flex items-center justify-between mb-5">
                     <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border
                       ${doc.ocr_status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 
@@ -163,7 +163,7 @@ export const Dashboard = ({
                   </div>
                   <div className="flex gap-1">
                     <button 
-                      onClick={() => doc.ocr_status === 'completed' && onSelectDoc(doc)}
+                      onClick={() => onSelectDoc(doc)}
                       className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all duration-200 opacity-0 group-hover:opacity-100"
                     >
                       <Eye className="w-4 h-4" />

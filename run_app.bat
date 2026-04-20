@@ -15,7 +15,6 @@ if not exist "node_modules\" (
     call pnpm install
     if %ERRORLEVEL% neq 0 (
         echo [ERROR] pnpm install failed. Please ensure Node.js and pnpm are installed.
-        pause
         exit /b 1
     )
 )
@@ -24,7 +23,6 @@ if not exist "node_modules\" (
 if not exist "python_embed\python.exe" (
     echo [ERROR] Embedded Python environment not found in 'python_embed' folder.
     echo Please ensure the python_embed directory is correctly set up.
-    pause
     exit /b 1
 )
 
@@ -37,7 +35,5 @@ call pnpm dev
 
 if %ERRORLEVEL% neq 0 (
     echo.
-    echo [INFO] Application closed.
+    echo [INFO] Application exited with code %ERRORLEVEL%.
 )
-
-pause

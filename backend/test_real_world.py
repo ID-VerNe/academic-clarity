@@ -42,11 +42,10 @@ async def run_real_integration_test():
         # 3. 指定 PDF 文件
         pdf_path = r"C:\Users\VerNe\Downloads\Documents\academic-clarity\workspace\10_48550-arxiv_2103_12553.pdf"
         if not os.path.exists(pdf_path):
-            print(f"[ERROR] PDF not found at: {pdf_path}")
+            print(f"\n[SKIP] Real-world test skipped: PDF not found at {pdf_path}")
             return
 
-        # 4. 执行全链路 OCR + JSON 提取
-        print(f"[Phase 1] Starting Real OCR for: {os.path.basename(pdf_path)}")
+        # 4. 执行全链路 OCR + JSON 提取        print(f"[Phase 1] Starting Real OCR for: {os.path.basename(pdf_path)}")
         doc_id = db.add_document(os.path.basename(pdf_path), pdf_path, pdf_path)
         
         start_time = time.time()
