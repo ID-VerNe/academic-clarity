@@ -12,17 +12,21 @@ We use a layered testing strategy to ensure robustness:
 
 | Layer | Tool | Command | Scope |
 | :--- | :--- | :--- | :--- |
-| **Unit** | Python `unittest` | `.\python_embed\python.exe tests/test_database.py` | DB CRUD, Text cleaning |
-| **Security** | Custom Audit | `.\python_embed\python.exe tests/test_final_audit.py` | Path traversal, SQL Injection |
-| **Integration**| Real API Test | `.\python_embed\python.exe tests/test_real_world.py` | OCR -> JSON -> DB Full Cycle |
+| **Unit** | Python `unittest` | `.\python_embed\python.exe tests/unit/test_database.py` | DB CRUD, Text cleaning |
+| **Security** | Custom Audit | `.\python_embed\python.exe tests/security/test_final_audit.py` | Path traversal, SQL Injection |
+| **Integration**| Real API Test | `.\python_embed\python.exe tests/system/test_real_world.py` | OCR -> JSON -> DB Full Cycle |
 | **Build** | Vite/TSC | `pnpm build` | TS Types, Frontend bundling |
 
 ## 3. High-Performance Testing (Parallel & Isolated)
 Run `run_tests.bat` in the root directory. 
-- **Centralized**: All test cases are located in the `tests/` directory.
+- **Centralized & Categorized**: All test cases are located in the `tests/` directory, organized into functional subdirectories:
+    - `tests/unit/`: Atomic logic (Database, Text, Workspace).
+    - `tests/integration/`: Cross-module API and Pipeline flows.
+    - `tests/security/`: Security audits and concurrency tests.
+    - `tests/system/`: Real-world environment and edge case validation.
 - **Isolation**: Each test process automatically creates a unique, UUID-based temporary database and workspace. 
 - **Concurrency**: Tests run in parallel using multiple CPU cores to maximize speed.
-- **Auto-Cleanup**: All temporary artifacts (test databases, temp folders) are physically deleted from the `tests/` directory immediately after completion.
+- **Auto-Cleanup**: All temporary artifacts (test databases, temp folders) are physically deleted immediately after completion.
 
 
 ## 4. Multi-Dimensional Knowledge Graph (Intelligence Insight)
@@ -38,6 +42,7 @@ Run `run_tests.bat` in the root directory.
 
 ## 6. Testing & Quality Assurance Mandates
 - **Exhaustive UI Testing**: 100% of defined event handlers (`onClick`, `onChange`, `onBlur`, `onKeyDown`, etc.) MUST be covered by Vitest/RTL tests. No interactive element is considered "finished" without a behavioral test.
+- **Categorized Test Storage**: All new tests MUST be placed in their respective functional subdirectory. No raw script files allowed in `tests/` root.
+- **Path Robustness**: Test scripts MUST implement dynamic path discovery to locate the `backend/` directory regardless of nesting depth within `tests/`.
 - **Regression Prevention**: Any bug fixed MUST be accompanied by a new test case in the `tests/` or `src/**/*.test.tsx` files.
 - **Parallel Priority**: All new tests MUST be designed to run in parallel without resource conflicts (using unique UUID-based temp data).
-
