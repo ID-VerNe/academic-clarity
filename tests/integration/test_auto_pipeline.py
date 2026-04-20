@@ -6,10 +6,16 @@ import shutil
 import asyncio
 from unittest.mock import patch, MagicMock
 
-# Add backend to path
+# Add backend to path for imports
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-BACKEND_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "backend"))
-if BACKEND_PATH not in sys.path: sys.path.insert(0, BACKEND_PATH)
+current = BASE_DIR
+while current and not os.path.exists(os.path.join(current, "backend")):
+    new_current = os.path.dirname(current)
+    if new_current == current: break
+    current = new_current
+BACKEND_PATH = os.path.join(current, "backend")
+if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
+    sys.path.insert(0, BACKEND_PATH)
 
 from database import Database
 from services.workspace_service import WorkspaceService

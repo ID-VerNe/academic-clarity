@@ -5,8 +5,14 @@ import sys
 import uuid
 
 # Add backend to path for imports
-BACKEND_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
-if BACKEND_PATH not in sys.path: sys.path.insert(0, BACKEND_PATH)
+current = os.path.dirname(os.path.abspath(__file__))
+while current and not os.path.exists(os.path.join(current, "backend")):
+    new_current = os.path.dirname(current)
+    if new_current == current: break
+    current = new_current
+BACKEND_PATH = os.path.join(current, "backend")
+if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
+    sys.path.insert(0, BACKEND_PATH)
 
 from database import Database
 
