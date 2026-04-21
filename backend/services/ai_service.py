@@ -13,10 +13,13 @@ async def pil_to_base64(image):
 async def call_ocr_api(image, api_config):
     """
     Calls SiliconFlow DeepSeek-OCR API with 4000 token limit to avoid 8192 context wall.
+    使用官方推荐的 prompt 格式，确保 <|grounding|> token 被正确识别以输出 markdown。
     """
     base64_image = await pil_to_base64(image)
-    prompt = "<image>\n<|grounding|>Convert this document page into high-fidelity markdown. CRITICAL: Include all metadata, DOI strings, and footer text. Do NOT skip any word from the bottom of the page."
-    
+    # 严格遵循官方格式：<image>\n<|grounding|>指令
+    # 过长或复杂的 prompt 会干扰 <|grounding|> token 的识别，导致退化为纯文本 OCR
+    prompt = "<image>\n<|grounding|>Convert the document to markdown."
+
     try:
         response = await asyncio.to_thread(
             completion,

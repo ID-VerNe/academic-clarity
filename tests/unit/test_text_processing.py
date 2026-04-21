@@ -17,9 +17,11 @@ from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown
 
 class TestTextProcessing(unittest.TestCase):
     def test_clean_ocr_markdown_removes_tags(self):
-        raw = "<|ref|>image<|/ref|><|det|>1,2,3,4<|/det|> # Header"
+        # DeepSeek-OCR 格式: <|ref|>内容<|/ref|><|det|>坐标<|/det|>
+        # 新逻辑：保留 ref 标签内的内容，删除 det 标签及坐标
+        raw = "<|ref|>Title Text<|/ref|><|det|>1,2,3,4<|/det|> # Header"
         cleaned = clean_ocr_markdown(raw)
-        self.assertEqual(cleaned, "# Header")
+        self.assertEqual(cleaned, "Title Text # Header")
 
     def test_clean_ocr_markdown_replaces_latex(self):
         raw = r"\coloneqq \eqqcolon \approx"
