@@ -21,7 +21,7 @@ if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
     sys.path.insert(0, BACKEND_PATH)
 
 from database import Database
-from services.ocr_service import run_full_ocr_workflow
+from services.ocr_service import run_full_ocr_workflow, EmptyFileError
 from services.ai_service import call_json_extraction_api
 
 class TestEdgeCases(unittest.TestCase):
@@ -60,8 +60,13 @@ class TestEdgeCases(unittest.TestCase):
         
         doc_id = self.db.add_document("empty.pdf", empty_pdf_path, empty_pdf_path)
         
-        # run_full_ocr_workflow should catch fitz.FileNotFoundError or similar and mark as failed
-        asyncio.run(run_full_ocr_workflow(doc_id, empty_pdf_path, self.db))
+        # run_full_ocr_workflow should raise EmptyFileError and mark as failed
+        try:
+            asyncio.run(run_full_ocr_workflow(doc_id, empty_pdf_path, self.db))
+        except EmptyFileError:
+            pass # Specifically handled
+        except Exception as e:
+            self.fail(f"Expected EmptyFileError, got {type(e).__name__}: {e}")
         
         doc = self.db.get_document(doc_id)
         self.assertEqual(doc['ocr_status'], 'failed')

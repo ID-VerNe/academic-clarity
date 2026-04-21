@@ -5,37 +5,41 @@ from PIL import Image
 from io import BytesIO
 from services.ai_service import call_ocr_api, call_json_extraction_api
 from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown
-
 from services.config_service import ConfigService
 
-ocr_semaphore = asyncio.Semaphore(10)
+class EmptyFileError(Exception):
+    """Raised when the PDF file is 0 bytes or essentially empty."""
+    pass
 
 async def process_page_task(page_idx, total_pages, pix_data, api_config, retries=3):
     """
     Task for processing a single page of a PDF with automatic retries.
     """
-    async with ocr_semaphore:
-        for attempt in range(retries):
-            print(f"[OCR] Processing Page {page_idx + 1}/{total_pages} (Attempt {attempt + 1})...")
-            try:
-                image = Image.open(BytesIO(pix_data))
-                content = await call_ocr_api(image, api_config)
-                return content
-            except Exception as e:
-                wait_time = (attempt + 1) * 2 # 指数退避
-                print(f"  [OCR] Page {page_idx + 1} failed: {e}. Retrying in {wait_time}s...")
-                if attempt < retries - 1:
-                    await asyncio.sleep(wait_time)
-                else:
-                    return f"\n\n> [Critical Error on Page {page_idx + 1} after {retries} retries: {str(e)}]\n\n"
-
+    for attempt in range(retries):
+        print(f"[OCR] Processing Page {page_idx + 1}/{total_pages} (Attempt {attempt + 1})...")
+        try:
+            image = Image.open(BytesIO(pix_data))
+            content = await call_ocr_api(image, api_config)
+            return content
+        except Exception as e:
+            wait_time = (attempt + 1) * 2
+            print(f"  [OCR] Page {page_idx + 1} failed: {e}. Retrying...")
+            if attempt < retries - 1:
+                await asyncio.sleep(wait_time)
+            else:
+                return f"\n\n> [Error on Page {page_idx + 1}]\n\n"
 
 async def run_full_ocr_workflow(doc_id, pdf_path, db):
     """
-    Runs the full OCR workflow from PDF loading to database update.
+    全链路任务执行器：OCR -> Markdown -> Basic Insight。
+    由 task_manager 的 Worker 调用。
     """
-    print(f"[Task] Starting Full OCR for: {os.path.basename(pdf_path)}")
+    print(f"[TaskHub] Starting Full Pipeline for: {os.path.basename(pdf_path)}")
     try:
+        # Check if file is empty
+        if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+            raise EmptyFileError(f"File {pdf_path} is empty or missing.")
+
         db.update_document_ocr(doc_id, "processing")
         doc = fitz.open(pdf_path)
         total_pages = len(doc)
@@ -44,10 +48,9 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         ocr_api_config = config_service.get_ocr_config()
 
         if not ocr_api_config["api_key"]:
-            print("[Task] Error: DEEPSEEK_API_KEY not found in configs.")
-            db.update_document_ocr(doc_id, "failed")
-            return
+            raise Exception("API Key missing")
 
+        # 1. OCR 阶段
         page_tasks = []
         for i in range(total_pages):
             pix = doc[i].get_pixmap(dpi=144)
@@ -60,47 +63,35 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         cleaned_markdown = clean_ocr_markdown(raw_full_content)
         title = extract_title_from_markdown(raw_full_content)
         
-        # --- 阶段 2: 结构化 JSON 提取 (多维智库卡片) ---
-        print(f"[Task] Extracting DEFAULT metadata for: {title}")
-        
-        # 1. 定义基础信息提取 Prompt (加强 DOI 与 脚注感知)
+        # 2. 基础情报提取阶段
+        print(f"[TaskHub] Stage 2: Extracting Intelligence for {title}")
         default_prompt = """
         You are a highly precise academic metadata extractor.
-        Extract the following data from the markdown content. 
-        Note: DOIs and author details are often in footnotes or the very first page margins. 
+        Extract data from the markdown. Note: DOIs/Authors are often in page margins.
         
-        Return a JSON object with these EXACT keys:
-        - title: Full paper title
-        - authors: string of all authors (comma separated)
-        - journal_or_conference: Publication venue
-        - date: Year or full date
-        - doi: The DOI string (e.g., 10.1109/...)
-        - abstract: Concise 2-3 sentence abstract
-        - keywords: string of key terms
-        - summary: A 3-bullet point 'Why this matters' summary
+        Return JSON with:
+        - title: Full title
+        - authors: string (comma separated)
+        - journal_or_conference: venue
+        - date: Year/Date
+        - doi: DOI string (e.g. 10.1109/...)
+        - abstract: 2-3 sentence abstract
+        - keywords: string of terms
+        - summary: 3-bullet points
         """
         
-        config_service = ConfigService(db)
         extract_api_config = config_service.get_extract_config()
-        
         try:
-            # 提取基础信息
             metadata_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, default_prompt)
-            # 存入多维元数据表
             db.add_document_metadata(doc_id, "Basic Insight", metadata_json)
         except Exception as e:
-            print(f"[Task] Default Metadata Extraction Error: {e}")
+            print(f"[TaskHub] Metadata Stage Error: {e}")
 
-        # 检查是否还有用户自定义的额外提取需求 (可选扩展点)
-        user_custom_prompt = db.get_config("CUSTOM_EXTRACT_PROMPT")
-        if user_custom_prompt:
-            try:
-                custom_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, user_custom_prompt)
-                db.add_document_metadata(doc_id, "Custom Analysis", custom_json)
-            except: pass
-
+        # 3. 最终落库
         db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, raw=raw_full_content, title=title)
-        print(f"[Task] Finished: {title}")
+        print(f"[TaskHub] Pipeline SUCCESS: {title}")
     except Exception as e:
-        print(f"[Task] Error: {e}")
+        print(f"[TaskHub] Pipeline CRITICAL ERROR: {e}")
         db.update_document_ocr(doc_id, "failed")
+        # 抛出异常由 TaskManager 处理队尾重试
+        raise e
