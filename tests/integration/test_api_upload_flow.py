@@ -26,10 +26,12 @@ if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
 
 from fastapi.testclient import TestClient
 import server
-from server import app, db
+from server import app, state
 
 class TestApiUploadFlow(unittest.TestCase):
     def setUp(self):
+        # Ensure state is initialized for testing
+        state.initialize(test_ws)
         self.client = TestClient(app)
         self.test_ws = test_ws
 
@@ -46,27 +48,27 @@ class TestApiUploadFlow(unittest.TestCase):
         # 1. 准备 Mock PDF
         pdf_content = b"%PDF-1.4 mock"
         files = {"file": ("api_test.pdf", pdf_content, "application/pdf")}
-        
+
         # 2. 发送请求
         response = self.client.post("/documents/add", files=files)
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["success"])
-        
+
         # 3. 验证物理文件
         physical_path = os.path.join(self.test_ws, "api_test.pdf")
         self.assertTrue(os.path.exists(physical_path), "File was not copied!")
-        
+
         # 4. 验证后台任务是否被调用
         self.assertTrue(mock_ocr.called)
         print("  API Upload Flow Logic: PASS")
 
     def test_reprocess_api_logic(self):
         """验证重新处理接口"""
-        doc_id = db.add_document("retry.pdf", "o", os.path.join(self.test_ws, "retry.pdf"))
+        doc_id = state.db.add_document("retry.pdf", "o", os.path.join(self.test_ws, "retry.pdf"))
         # 创建一个空文件
         with open(os.path.join(self.test_ws, "retry.pdf"), "w") as f: f.write("m")
-        
+
         with patch('server.run_full_ocr_workflow') as mock_ocr:
             response = self.client.post(f"/documents/{doc_id}/reprocess")
             self.assertEqual(response.status_code, 200)

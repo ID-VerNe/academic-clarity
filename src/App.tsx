@@ -54,7 +54,12 @@ export default function App() {
   useEffect(() => {
     const cleanup = (window as any).api.onWorkspaceChanged((newPath: string) => {
       console.log('Workspace changed via Electron:', newPath);
-      // 切换工作区后立即同步
+      // 切换工作区后：
+      // 1. 清空当前文档列表，防止“幽灵文档”显示
+      setDocs([]);
+      setSelectedDoc(null);
+      setView('dashboard');
+      // 2. 触发后端同步
       handleSync();
     });
     return () => cleanup();

@@ -43,7 +43,7 @@ class TestWorkspaceSync(unittest.TestCase):
         results = self.service.scan_and_sync()
         
         # 3. 验证 DB 中是否增加了两条记录
-        self.assertEqual(results["added"], 2)
+        self.assertEqual(len(results), 2)
         docs = self.db.get_all_documents()
         self.assertEqual(len(docs), 2)
         filenames = [d['filename'] for d in docs]
@@ -58,7 +58,7 @@ class TestWorkspaceSync(unittest.TestCase):
         self.service.scan_and_sync() # 第一次
         results = self.service.scan_and_sync() # 第二次
         
-        self.assertEqual(results["added"], 0)
+        self.assertEqual(len(results), 0)
         docs = self.db.get_all_documents()
         self.assertEqual(len(docs), 1)
 
