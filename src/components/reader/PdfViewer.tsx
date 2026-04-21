@@ -13,20 +13,43 @@ interface PdfViewerProps {
 export const PdfViewer = ({ url }: PdfViewerProps) => {
   const [numPages, setNumPages] = useState<number>(0);
   const [containerWidth, setContainerWidth] = useState<number>(0);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-Scale Logic: Observe container size changes
+  // Use Object URL for maximum stability with react-pdf
+  useEffect(() => {
+    if (!url) return;
+    
+    const loadPdf = async () => {
+      try {
+        setLoadError(null);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const blob = await response.blob();
+        const localUrl = URL.createObjectURL(blob);
+        setBlobUrl(localUrl);
+      } catch (e: any) {
+        setLoadError(e.message);
+        console.error("PDF Blob load error:", e);
+      }
+    };
+
+    loadPdf();
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [url]);
+
+  // Auto-Scale Logic
   useEffect(() => {
     if (!containerRef.current) return;
-
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (entry) {
-        // Debounce slightly if needed, but react-pdf is quite fast
-        setContainerWidth(entry.contentRect.width - 48); // Margin safety
+        setContainerWidth(entry.contentRect.width - 48);
       }
     });
-
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, []);
@@ -35,11 +58,21 @@ export const PdfViewer = ({ url }: PdfViewerProps) => {
     setNumPages(numPages);
   }
 
-  if (!url) {
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4 text-rose-500 p-10 text-center">
+        <p className="font-bold">Failed to load PDF content.</p>
+        <p className="text-xs opacity-70">{loadError}</p>
+        <button onClick={() => window.location.reload()} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Retry Page</button>
+      </div>
+    );
+  }
+
+  if (!blobUrl) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-500">
         <div className="w-8 h-8 border-4 border-slate-400 border-t-indigo-600 rounded-full animate-spin" />
-        <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Loading Pipeline...</p>
+        <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Streaming PDF Bytes...</p>
       </div>
     );
   }
@@ -48,8 +81,9 @@ export const PdfViewer = ({ url }: PdfViewerProps) => {
     <div ref={containerRef} className="h-full overflow-y-auto overflow-x-hidden bg-slate-300 p-4 scroll-smooth">
       <div className="max-w-fit mx-auto shadow-2xl">
         <Document 
-          file={url} 
+          file={blobUrl} 
           onLoadSuccess={onDocumentLoadSuccess}
+          onLoadError={(err) => setLoadError(err.message)}
           loading={
              <div className="py-20 text-center">
                <p className="text-xs font-black uppercase text-slate-500">Rendering high-fidelity pages...</p>

@@ -61,9 +61,15 @@ app.add_middleware(
 
 @app.get("/files/{filename}")
 async def serve_file(filename: str):
-    file_path = os.path.join(state.workspace_path, filename)
+    import urllib.parse
+    decoded_filename = urllib.parse.unquote(filename)
+    file_path = os.path.join(state.workspace_path, decoded_filename)
     if os.path.exists(file_path):
-        return FileResponse(file_path)
+        return FileResponse(
+            file_path, 
+            media_type='application/pdf',
+            headers={"Content-Disposition": f"inline; filename={filename}"}
+        )
     raise HTTPException(status_code=404)
 
 # --- Schemas ---

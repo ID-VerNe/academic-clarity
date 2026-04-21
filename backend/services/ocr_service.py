@@ -63,21 +63,27 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         cleaned_markdown = clean_ocr_markdown(raw_full_content)
         title = extract_title_from_markdown(raw_full_content)
         
-        # 2. 基础情报提取阶段
-        print(f"[TaskHub] Stage 2: Extracting Intelligence for {title}")
+        # 2. 基础情报提取阶段 (极致加固 DOI 提取逻辑)
+        print(f"[TaskHub] Stage 2: Deep Extraction for {title}")
         default_prompt = """
-        You are a highly precise academic metadata extractor.
-        Extract data from the markdown. Note: DOIs/Authors are often in page margins.
+        You are a world-class academic metadata curator. 
+        Your mission is to extract precise metadata from the provided markdown.
         
-        Return JSON with:
-        - title: Full title
-        - authors: string (comma separated)
-        - journal_or_conference: venue
-        - date: Year/Date
-        - doi: DOI string (e.g. 10.1109/...)
-        - abstract: 2-3 sentence abstract
-        - keywords: string of terms
-        - summary: 3-bullet points
+        ### CRITICAL MISSION: DOI EXTRACTION
+        - Look for strings starting with '10.' followed by a prefix and suffix (e.g., 10.1109/TVCG.2023.12345).
+        - The DOI is often located in the very first or last lines of the markdown, or within 'Footnotes' section.
+        - If you find multiple, pick the one that looks like a formal document identifier.
+        
+        ### OTHER FIELDS
+        - title: The full academic title.
+        - authors: All authors as a comma-separated string.
+        - journal_or_conference: Full venue name (e.g., IEEE Transactions on...).
+        - date: The year (YYYY) or full publication date.
+        - abstract: A sharp 2-3 sentence summary.
+        - keywords: 5-8 relevant terms.
+        - summary: 3 power-bullets on 'Novelty', 'Method', and 'Impact'.
+        
+        Return ONLY a JSON object.
         """
         
         extract_api_config = config_service.get_extract_config()
