@@ -60,8 +60,14 @@ class MetadataRequest(BaseModel):
 async def health():
     return {"status": "ok", "workspace": WORKSPACE_PATH}
 
+@app.get("/tasks")
+async def list_active_tasks():
+    """返回所有待处理或处理中的文档作为任务队列"""
+    docs = db.get_all_documents()
+    return [d for d in docs if d['ocr_status'] in ['pending', 'processing']]
+
 @app.post("/workspace/sync")
-async def sync_workspace():
+async def sync_workspace(background_tasks: BackgroundTasks = None):
     results = workspace_service.scan_and_sync()
     return {"success": True, "results": results}
 

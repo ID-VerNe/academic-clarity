@@ -32,6 +32,12 @@ class ApiClient {
     return res.json();
   }
 
+  async getActiveTasks() {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/tasks`);
+    return res.json();
+  }
+
   async uploadDocument(file: File) {
     const baseUrl = await this.getBaseUrl();
     const formData = new FormData();

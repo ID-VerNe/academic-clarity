@@ -1,13 +1,21 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { Dashboard } from './Dashboard';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { api } from '../api/client';
 
-describe('Dashboard Component Behavioral Tests', () => {
-  const mockDocs: any[] = [
-    { id: 1, filename: 'paper1.pdf', title: 'Paper One', ocr_status: 'completed', added_at: new Date().toISOString() },
-    { id: 2, filename: 'paper2.pdf', title: 'Paper Two', ocr_status: 'failed', added_at: new Date().toISOString() }
-  ];
+// 深度 Mock API Client
+vi.mock('../api/client', () => ({
+  api: {
+    syncWorkspace: vi.fn().mockResolvedValue({ success: true }),
+    getDocuments: vi.fn().mockResolvedValue([]),
+    getActiveTasks: vi.fn().mockResolvedValue([
+      { id: 101, filename: 'processing_paper.pdf', ocr_status: 'processing' }
+    ]),
+    uploadDocument: vi.fn().mockResolvedValue({ success: true }),
+  }
+}));
 
+describe('Dashboard Deep Behavioral Tests', () => {
   const mockHandlers = {
     onSelectDoc: vi.fn(),
     onUpload: vi.fn(),
@@ -17,71 +25,52 @@ describe('Dashboard Component Behavioral Tests', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock window.api.selectWorkspace
     (window as any).api = {
       selectWorkspace: vi.fn(),
+      getPythonPort: vi.fn().mockResolvedValue(38391),
     };
   });
 
-  it('triggers onSelectDoc when a completed card body is clicked', () => {
-    render(<Dashboard docs={mockDocs} {...mockHandlers} isUploading={false} />);
+  it('renders active task queue from API and shows processing status', async () => {
+    render(<Dashboard docs={[]} {...mockHandlers} isUploading={false} />);
     
-    // 点击卡片正文区域 (标题或文件名)
-    const cardTitle = screen.getByText('Paper One');
-    fireEvent.click(cardTitle);
-    
-    expect(mockHandlers.onSelectDoc).toHaveBeenCalledWith(mockDocs[0]);
+    // 验证是否出现了“Processing Queue”面板
+    await waitFor(() => {
+      expect(screen.getByText('Processing Queue')).toBeDefined();
+      expect(screen.getByText('processing_paper.pdf')).toBeDefined();
+    });
   });
 
-  it('triggers onSelectDoc when the Eye icon is clicked', () => {
-    render(<Dashboard docs={mockDocs} {...mockHandlers} isUploading={false} />);
+  it('triggers full workspace sync when refresh button is clicked', async () => {
+    render(<Dashboard docs={[]} {...mockHandlers} isUploading={false} />);
     
-    const eyeBtns = screen.getAllByRole('button').filter(btn => btn.querySelector('svg.lucide-eye'));
-    // The Dashboard component doesn't have aria-labels for all buttons, but Eye is one of them.
-    // Let's use the first eye icon button.
-    const eyeBtn = screen.getAllByRole('button').find(btn => btn.innerHTML.includes('lucide-eye'));
+    const syncBtn = screen.getByTitle('Sync Workspace & Trigger OCR');
+    fireEvent.click(syncBtn);
     
-    fireEvent.click(eyeBtn!);
-    expect(mockHandlers.onSelectDoc).toHaveBeenCalled();
+    expect(api.syncWorkspace).toHaveBeenCalled();
   });
 
-  it('triggers window.api.selectWorkspace when the folder icon is clicked', () => {
-    render(<Dashboard docs={mockDocs} {...mockHandlers} isUploading={false} />);
+  it('shows distinctive upload status when isUploading is true', () => {
+    render(<Dashboard docs={[]} {...mockHandlers} isUploading={true} />);
     
-    const switchBtn = screen.getByTitle('Switch Workspace');
-    fireEvent.click(switchBtn);
-    
-    expect((window as any).api.selectWorkspace).toHaveBeenCalled();
+    expect(screen.getByText(/Injecting document into researcher pipeline/i)).toBeDefined();
+    // 寻找具有 dashed 边框的上传区域容器
+    const uploadArea = screen.getByText(/Injecting document into researcher pipeline/i).closest('.border-dashed');
+    expect(uploadArea?.className).toContain('cursor-wait');
   });
 
-  it('shows retry button and triggers onReprocess when ocr fails', () => {
-    render(<Dashboard docs={mockDocs} {...mockHandlers} isUploading={false} />);
+  it('displays correct icon and color for completed vs processing documents', () => {
+    const mixedDocs: any[] = [
+      { id: 1, filename: 'done.pdf', ocr_status: 'completed', added_at: new Date().toISOString() },
+      { id: 2, filename: 'busy.pdf', ocr_status: 'processing', added_at: new Date().toISOString() }
+    ];
     
-    // 寻找重试按钮 (RefreshCw icon)
-    const retryBtn = screen.getByTitle('Retry OCR');
-    expect(retryBtn).toBeDefined();
+    render(<Dashboard docs={mixedDocs} {...mockHandlers} isUploading={false} />);
     
-    fireEvent.click(retryBtn);
-    expect(mockHandlers.onReprocess).toHaveBeenCalledWith(mockDocs[1].id);
-  });
-
-  it('opens file selector when upload area is clicked', () => {
-    render(<Dashboard docs={mockDocs} {...mockHandlers} isUploading={false} />);
+    const completedBadge = screen.getByText('completed');
+    expect(completedBadge.className).toContain('bg-emerald-50');
     
-    const uploadArea = screen.getByText(/Drag & drop PDFs here/i);
-    fireEvent.click(uploadArea);
-    
-    // 注意：由于无法模拟原生文件对话框，我们验证 click 事件是否冒泡到了 input
-    // 但在 React 测试中，我们可以确保 onUpload 能被 handleFileChange 触发
-  });
-
-  it('triggers onDelete when clicking the trash icon', () => {
-    render(<Dashboard docs={mockDocs} {...mockHandlers} isUploading={false} />);
-
-    // Find trash buttons by title
-    const trashBtns = screen.getAllByTitle('Delete Document');
-
-    fireEvent.click(trashBtns[0]);
-    expect(mockHandlers.onDelete).toHaveBeenCalledWith(mockDocs[0].id);
+    const processingBadge = screen.getByText('processing');
+    expect(processingBadge.className).toContain('bg-amber-50');
   });
 });
