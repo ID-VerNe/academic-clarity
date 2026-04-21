@@ -12,6 +12,26 @@ Object.defineProperty(window, 'api', {
   writable: true,
 });
 
+// Mock ResizeObserver
+global.ResizeObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
+}));
+
+// Mock DOMMatrix (required by pdf.js in Node/JSDOM)
+if (!global.DOMMatrix) {
+  (global as any).DOMMatrix = class DOMMatrix {
+    constructor() {}
+    static fromMatrix() { return new DOMMatrix(); }
+  };
+}
+
+// Mock PointerEvent (needed for some drag-drop tests in jsdom)
+if (!global.PointerEvent) {
+  (global as any).PointerEvent = class PointerEvent extends MouseEvent {};
+}
+
 // Mock fetch globally
 global.fetch = vi.fn().mockResolvedValue({
   ok: true,

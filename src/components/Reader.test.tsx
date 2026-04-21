@@ -1,7 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { Reader } from './Reader';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { api } from '../api/client';
 
 // Mock the API client
 vi.mock('../api/client', () => ({
@@ -31,24 +30,36 @@ describe('Reader Component', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.innerWidth = 1200;
   });
 
   it('toggles left structure panel when the chevron button is clicked', async () => {
     render(<Reader {...mockProps} />);
-    
-    // Initially, "Structure" label should be visible
     expect(screen.getByText('Structure')).toBeDefined();
     
     const toggleBtn = screen.getByLabelText('Toggle Left Sidebar');
     fireEvent.click(toggleBtn);
     
-    // After clicking, "Structure" label should be gone
     await waitFor(() => {
       expect(screen.queryByText('Structure')).toBeNull();
     });
     
-    // Click again to expand
     fireEvent.click(toggleBtn);
     expect(screen.getByText('Structure')).toBeDefined();
+  });
+
+  it('detects left sidebar resizing via mouse dragging', async () => {
+    render(<Reader {...mockProps} />);
+    
+    const handle = screen.getByTestId('resize-handle-left');
+    
+    // Simulate resizing to collapse
+    fireEvent.mouseDown(handle);
+    fireEvent.mouseMove(document, { clientX: 50 });
+    fireEvent.mouseUp(document);
+    
+    await waitFor(() => {
+      expect(screen.queryByText('Structure')).toBeNull();
+    });
   });
 });

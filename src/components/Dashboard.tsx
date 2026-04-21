@@ -208,9 +208,9 @@ export const Dashboard = ({
             </select>
           </div>
 
-          {(selectedJournal !== 'all' || selectedYear !== 'all') && (
+          {(selectedJournal !== 'all' || selectedYear !== 'all' || searchQuery) && (
             <button 
-              onClick={() => { setSelectedJournal('all'); setSelectedYear('all'); }}
+              onClick={() => { setSelectedJournal('all'); setSelectedYear('all'); setSearchQuery(''); }}
               className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors"
               title="Clear Filters"
             >

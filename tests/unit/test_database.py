@@ -3,6 +3,7 @@ import unittest
 import sqlite3
 import sys
 import uuid
+import json
 
 # Add backend to path for imports
 current = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +53,20 @@ class TestDatabase(unittest.TestCase):
         success = self.db.delete_document(doc_id)
         self.assertTrue(success)
         self.assertIsNone(self.db.get_document(doc_id))
+
+    def test_get_all_documents_with_metadata_join(self):
+        # 1. Add doc
+        doc_id = self.db.add_document("test.pdf", "/raw/path", "/stored/path")
+        
+        # 2. Add 'Basic Insight' metadata
+        insight = {"journal_or_conference": "Nature", "date": "2023"}
+        self.db.add_document_metadata(doc_id, "Basic Insight", json.dumps(insight))
+        
+        # 3. Get all docs and check JOIN result
+        docs = self.db.get_all_documents()
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0]['basic_insight_json'], json.dumps(insight))
+        self.assertEqual(docs[0]['id'], doc_id)
 
 if __name__ == "__main__":
     unittest.main()
