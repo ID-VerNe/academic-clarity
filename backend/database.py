@@ -141,5 +141,17 @@ class Database:
         with self.get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM documents ORDER BY added_at DESC')
+            # 聚合查询：带入最新的 Basic Insight 元数据
+            cursor.execute('''
+                SELECT d.*, m.content_json as basic_insight_json
+                FROM documents d
+                LEFT JOIN (
+                    SELECT doc_id, content_json
+                    FROM document_metadata
+                    WHERE label = 'Basic Insight'
+                    GROUP BY doc_id
+                    HAVING MAX(created_at)
+                ) m ON d.id = m.doc_id
+                ORDER BY d.added_at DESC
+            ''')
             return [dict(row) for row in cursor.fetchall()]

@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   ChevronRight, 
   FileText, 
   FlaskConical, 
   BarChart3, 
   MessageSquare, 
-  BookOpen
+  BookOpen,
+  GripVertical
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -26,13 +27,25 @@ interface ReaderProps {
 }
 
 export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string>('');
   const [viewMode, setViewMode] = useState<'split' | 'pdf' | 'markdown'>('split');
   const [chatQuery, setChatQuery] = useState('');
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string}[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  
+  // Resizable Logic: Left Sidebar
+  const [leftWidth, setLeftWidth] = useState(260);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const isResizingLeft = useRef(false);
+
+  // Resizable Logic: Right Sidebar
+  const [rightWidth, setRightWidth] = useState(400);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const isResizingRight = useRef(false);
+
+  // Resizable Logic: Mid Split
+  const [splitRatio, setSplitRatio] = useState(50); // percentage for PDF
+  const isResizingSplit = useRef(false);
 
   useEffect(() => {
     const fetchPdfUrl = async () => {
@@ -45,6 +58,41 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
     };
     fetchPdfUrl();
   }, [doc.id, doc.filename]);
+
+  const onMouseMove = useCallback((e: MouseEvent) => {
+    if (isResizingLeft.current) {
+      const newWidth = Math.max(48, Math.min(600, e.clientX));
+      setLeftWidth(newWidth);
+      setLeftCollapsed(newWidth < 100);
+    } else if (isResizingRight.current) {
+      const newWidth = Math.max(48, Math.min(800, window.innerWidth - e.clientX));
+      setRightWidth(newWidth);
+      setRightCollapsed(newWidth < 100);
+    } else if (isResizingSplit.current) {
+      const centerArea = window.innerWidth - (leftCollapsed ? 48 : leftWidth) - (rightCollapsed ? 48 : rightWidth);
+      const relativeX = e.clientX - (leftCollapsed ? 48 : leftWidth);
+      const newRatio = Math.max(10, Math.min(90, (relativeX / centerArea) * 100));
+      setSplitRatio(newRatio);
+    }
+  }, [leftWidth, leftCollapsed, rightWidth, rightCollapsed]);
+
+  const onMouseUp = useCallback(() => {
+    isResizingLeft.current = false;
+    isResizingRight.current = false;
+    isResizingSplit.current = false;
+    document.body.style.cursor = 'default';
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  }, [onMouseMove]);
+
+  const startResizing = (type: 'left' | 'right' | 'split') => {
+    if (type === 'left') isResizingLeft.current = true;
+    if (type === 'right') isResizingRight.current = true;
+    if (type === 'split') isResizingSplit.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
 
   const handleSendMessage = async () => {
     if (!chatQuery.trim()) return;
@@ -69,14 +117,10 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="flex h-[calc(100vh-64px)] overflow-hidden bg-slate-100 font-sans"
-    >
-      {/* Left Sidebar: Structure (TOC) */}
+    <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-slate-100 font-sans select-none">
+      {/* Left Sidebar */}
       <motion.aside 
-        animate={{ width: leftCollapsed ? 48 : 260 }}
+        animate={{ width: leftCollapsed ? 48 : leftWidth }}
         className="shrink-0 border-r border-slate-200 bg-slate-50 relative flex flex-col overflow-hidden z-30 shadow-sm"
       >
         <div className="p-4 border-b border-slate-200 flex items-center justify-between overflow-hidden text-slate-900">
@@ -108,9 +152,17 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
             </button>
           </nav>
         )}
+
+        {/* Resize Handle: Left */}
+        <div 
+          onMouseDown={() => startResizing('left')}
+          className="absolute right-0 top-0 bottom-0 w-1 hover:bg-indigo-400 cursor-col-resize z-50 transition-colors flex items-center justify-center group"
+        >
+           <GripVertical className="w-3 h-3 text-white opacity-0 group-hover:opacity-100" />
+        </div>
       </motion.aside>
 
-      {/* Main Content Area */}
+      {/* Main Area */}
       <section className="flex-1 flex flex-col min-w-0 bg-slate-200 overflow-hidden relative z-20">
         <ReaderToolbar 
           onBack={onBack}
@@ -120,48 +172,63 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
         />
         
         <div className="flex-1 flex overflow-hidden">
-          <AnimatePresence mode="popLayout">
-            {(viewMode === 'pdf' || viewMode === 'split') && (
-              <motion.div 
-                key="pdf-viewer"
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className={`h-full bg-slate-300 border-r border-slate-300 relative ${viewMode === 'split' ? 'w-1/2' : 'w-full'}`}
-              >
-                <PdfViewer url={pdfUrl} />
-              </motion.div>
-            )}
+          {(viewMode === 'pdf' || viewMode === 'split') && (
+            <div 
+              style={{ width: viewMode === 'split' ? `${splitRatio}%` : '100%' }}
+              className="h-full bg-slate-300 relative"
+            >
+              <PdfViewer url={pdfUrl} />
+            </div>
+          )}
 
-            {(viewMode === 'markdown' || viewMode === 'split') && (
-              <motion.div 
-                key="markdown-viewer"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                className={`h-full bg-white overflow-y-auto px-8 lg:px-12 py-10 selection:bg-indigo-100 ${viewMode === 'split' ? 'w-1/2' : 'w-full'}`}
-              >
-                <MarkdownViewer 
-                  content={doc.ocr_markdown} 
-                  tableStyle={tableStyle} 
-                  isSplitView={viewMode === 'split'} 
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {viewMode === 'split' && (
+            <div 
+              onMouseDown={() => startResizing('split')}
+              className="w-1.5 bg-slate-300 hover:bg-indigo-400 cursor-col-resize transition-colors z-40 flex items-center justify-center group"
+            >
+               <GripVertical className="w-3 h-3 text-white opacity-0 group-hover:opacity-100" />
+            </div>
+          )}
+
+          {(viewMode === 'markdown' || viewMode === 'split') && (
+            <div 
+              style={{ width: viewMode === 'split' ? `${100 - splitRatio}%` : '100%' }}
+              className="h-full bg-white overflow-y-auto px-8 lg:px-12 py-10 selection:bg-indigo-100"
+            >
+              <MarkdownViewer 
+                content={doc.ocr_markdown} 
+                tableStyle={tableStyle} 
+                isSplitView={viewMode === 'split'} 
+              />
+            </div>
+          )}
         </div>
       </section>
 
-      <ChatSidebar 
-        docId={doc.id}
-        collapsed={rightCollapsed}
-        setCollapsed={setRightCollapsed}
-        chatHistory={chatHistory}
-        chatQuery={chatQuery}
-        setChatQuery={setChatQuery}
-        isTyping={isTyping}
-        onSendMessage={handleSendMessage}
-      />
-    </motion.div>
+      {/* Right Sidebar */}
+      <motion.aside 
+        animate={{ width: rightCollapsed ? 48 : rightWidth }}
+        className="shrink-0 bg-slate-50 border-l border-slate-200 relative overflow-hidden flex flex-col z-30 shadow-sm"
+      >
+        {/* Resize Handle: Right */}
+        <div 
+          onMouseDown={() => startResizing('right')}
+          className="absolute left-0 top-0 bottom-0 w-1 hover:bg-indigo-400 cursor-col-resize z-50 transition-colors flex items-center justify-center group"
+        >
+           <GripVertical className="w-3 h-3 text-white opacity-0 group-hover:opacity-100" />
+        </div>
+
+        <ChatSidebar 
+          docId={doc.id}
+          collapsed={rightCollapsed}
+          setCollapsed={setRightCollapsed}
+          chatHistory={chatHistory}
+          chatQuery={chatQuery}
+          setChatQuery={setChatQuery}
+          isTyping={isTyping}
+          onSendMessage={handleSendMessage}
+        />
+      </motion.aside>
+    </div>
   );
 };

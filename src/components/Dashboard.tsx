@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { 
   Plus, 
   CloudUpload, 
@@ -14,7 +14,10 @@ import {
   CheckCircle2,
   AlertCircle,
   ShieldAlert,
-  Search
+  Search,
+  Calendar,
+  Building2,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Document } from '../types';
@@ -41,8 +44,13 @@ export const Dashboard = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeTasks, setActiveTasks] = useState<Document[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  
+  // Filtering States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedJournal, setSelectedJournal] = useState<string>('all');
+  const [selectedYear, setSelectedYear] = useState<string>('all');
 
-  // Poll for active tasks (OCR/Extraction)
+  // Poll for active tasks
   useEffect(() => {
     const fetchTasks = async () => {
       try {
@@ -71,16 +79,53 @@ export const Dashboard = ({
     }
   };
 
-  // 状态判定逻辑：基于情报完整度
+  // 状态判定逻辑
   const getDocStatus = (doc: Document) => {
     const hasMarkdown = !!doc.ocr_markdown && doc.ocr_markdown.length > 10;
-    const hasMetadata = !!doc.metadata_json; // 这里假设 backend 已经把 Basic Insight 聚合进来了，或者前端判断状态
+    const hasMetadata = !!doc.basic_insight_json;
 
     if (doc.ocr_status === 'processing' || doc.ocr_status === 'pending') return 'processing';
     if (!hasMarkdown || doc.ocr_status === 'failed') return 'failed';
-    if (hasMarkdown && !hasMetadata) return 'partial'; // 有原文无情报 -> Warning
-    return 'completed'; // 全链路完成 -> Success
+    if (hasMarkdown && !hasMetadata) return 'partial';
+    return 'completed';
   };
+
+  // Intelligence Parsing & Filtering
+  const filteredDocs = useMemo(() => {
+    return docs.filter(doc => {
+      const insight = doc.basic_insight_json ? JSON.parse(doc.basic_insight_json) : {};
+      const matchesSearch = (doc.title || doc.filename).toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (doc.authors || '').toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesJournal = selectedJournal === 'all' || insight.journal_or_conference === selectedJournal;
+      const matchesYear = selectedYear === 'all' || (insight.date && insight.date.toString().includes(selectedYear));
+      
+      return matchesSearch && matchesJournal && matchesYear;
+    });
+  }, [docs, searchQuery, selectedJournal, selectedYear]);
+
+  // Derived Filter Options
+  const filterOptions = useMemo(() => {
+    const journals = new Set<string>();
+    const years = new Set<string>();
+    
+    docs.forEach(doc => {
+      if (doc.basic_insight_json) {
+        try {
+          const insight = JSON.parse(doc.basic_insight_json);
+          if (insight.journal_or_conference) journals.add(insight.journal_or_conference);
+          if (insight.date) {
+            const yearMatch = insight.date.toString().match(/\d{4}/);
+            if (yearMatch) years.add(yearMatch[0]);
+          }
+        } catch(e) {}
+      }
+    });
+    
+    return {
+      journals: Array.from(journals).sort(),
+      years: Array.from(years).sort((a, b) => b.localeCompare(a))
+    };
+  }, [docs]);
 
   return (
     <motion.main 
@@ -120,6 +165,61 @@ export const Dashboard = ({
         </div>
       </div>
 
+      {/* Intelligence Filter Bar */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-3 shadow-sm flex flex-wrap items-center gap-4">
+        <div className="flex-1 min-w-[300px] relative group">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+          <input 
+            type="text"
+            placeholder="Search papers, authors, or insights..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-indigo-100 transition-all outline-none"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+            <select 
+              value={selectedJournal}
+              onChange={(e) => setSelectedJournal(e.target.value)}
+              className="pl-9 pr-8 py-2.5 bg-slate-50 border-none rounded-2xl text-[12px] font-bold text-slate-600 appearance-none focus:ring-2 focus:ring-indigo-100 outline-none cursor-pointer"
+            >
+              <option value="all">All Journals</option>
+              {filterOptions.journals.map(j => <option key={j} value={j}>{j}</option>)}
+            </select>
+          </div>
+
+          <div className="relative">
+            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+            <select 
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              className="pl-9 pr-8 py-2.5 bg-slate-50 border-none rounded-2xl text-[12px] font-bold text-slate-600 appearance-none focus:ring-2 focus:ring-indigo-100 outline-none cursor-pointer"
+            >
+              <option value="all">All Years</option>
+              {filterOptions.years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+
+          {(selectedJournal !== 'all' || selectedYear !== 'all') && (
+            <button 
+              onClick={() => { setSelectedJournal('all'); setSelectedYear('all'); }}
+              className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors"
+              title="Clear Filters"
+            >
+              <Filter className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Active Tasks Queue */}
       <AnimatePresence>
         {activeTasks.length > 0 && (
@@ -155,29 +255,12 @@ export const Dashboard = ({
         )}
       </AnimatePresence>
 
-      <div 
-        onClick={() => !isUploading && fileInputRef.current?.click()}
-        className={`w-full h-32 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-all group relative overflow-hidden
-          ${isUploading ? 'bg-slate-50 border-slate-200 cursor-wait' : 'bg-white border-slate-200 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30'}`}
-      >
-        <input type="file" ref={fileInputRef} className="hidden" accept=".pdf" onChange={handleFileChange} />
-        {isUploading ? (
-          <div className="flex items-center gap-3">
-            <Loader2 className="w-6 h-6 text-indigo-600 animate-spin" />
-            <p className="text-indigo-600 font-bold">Injecting document into researcher pipeline...</p>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center">
-            <CloudUpload className="w-8 h-8 text-indigo-400 mb-2 group-hover:scale-110 transition-transform" />
-            <p className="text-slate-500 font-bold text-sm">Drop PDF to initialize AI processing</p>
-          </div>
-        )}
-      </div>
-
       <section>
         <div className="flex items-center justify-between mb-8 border-b border-slate-200 pb-px">
           <div className="flex gap-8">
-            <button className="text-indigo-600 font-bold text-sm border-b-2 border-indigo-600 pb-4 -mb-px">Research Library</button>
+            <button className="text-indigo-600 font-bold text-sm border-b-2 border-indigo-600 pb-4 -mb-px">
+              Research Library {filteredDocs.length !== docs.length && `(${filteredDocs.length}/${docs.length})`}
+            </button>
           </div>
           <div className="flex items-center gap-4 pb-4">
              <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase">
@@ -192,17 +275,27 @@ export const Dashboard = ({
           </div>
         </div>
 
-        {docs.length === 0 ? (
+        {filteredDocs.length === 0 ? (
           <div className="py-20 text-center space-y-4">
             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto">
-              <BookOpen className="w-8 h-8 text-slate-300" />
+              <Search className="w-8 h-8 text-slate-300" />
             </div>
-            <p className="text-slate-400 font-medium">Your library is empty. Start by dropping a PDF.</p>
+            <p className="text-slate-400 font-medium">No intelligence matches your current filter.</p>
+            {(selectedJournal !== 'all' || selectedYear !== 'all' || searchQuery) && (
+              <button 
+                onClick={() => { setSearchQuery(''); setSelectedJournal('all'); setSelectedYear('all'); }}
+                className="text-indigo-600 font-bold text-xs hover:underline"
+              >
+                Reset all filters
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {docs.map((doc) => {
+            {filteredDocs.map((doc) => {
               const status = getDocStatus(doc);
+              const insight = doc.basic_insight_json ? JSON.parse(doc.basic_insight_json) : null;
+              
               return (
                 <motion.div 
                   key={doc.id}
@@ -245,6 +338,14 @@ export const Dashboard = ({
                     <h3 className="font-serif text-lg text-slate-800 leading-snug line-clamp-2 group-hover:text-indigo-600 transition-colors mb-2">
                       {doc.title || doc.filename}
                     </h3>
+                    
+                    {insight?.journal_or_conference && (
+                      <div className="flex items-center gap-2 mb-2">
+                        <Building2 className="w-3 h-3 text-indigo-400" />
+                        <span className="text-[10px] font-bold text-slate-500 truncate">{insight.journal_or_conference}</span>
+                      </div>
+                    )}
+
                     <div className="flex items-center gap-2 text-slate-400">
                       <FileText className="w-3 h-3" />
                       <p className="text-[10px] font-medium truncate italic max-w-[150px]">
@@ -257,7 +358,7 @@ export const Dashboard = ({
                     <div className="flex flex-col">
                       <span className="text-[8px] text-slate-300 uppercase font-black tracking-tighter">Acquired</span>
                       <span className="text-[10px] text-slate-500 font-bold">
-                        {new Date(doc.added_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {insight?.date ? insight.date : new Date(doc.added_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                       </span>
                     </div>
                     <div className="flex gap-1">
@@ -287,7 +388,7 @@ export const Dashboard = ({
             <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Core Active</span>
           </div>
           <span className="text-[10px] text-slate-300">|</span>
-          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{docs.length} Papers in Library</span>
+          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{filteredDocs.length} Visible Intelligence</span>
         </div>
       </footer>
     </motion.main>

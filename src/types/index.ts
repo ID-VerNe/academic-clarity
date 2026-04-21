@@ -10,6 +10,7 @@ export interface Document {
   ocr_status: OCRStatus;
   ocr_markdown?: string;
   metadata_json?: string;
+  basic_insight_json?: string; // 聚合的 Basic Insight
   added_at: string;
 }
 
