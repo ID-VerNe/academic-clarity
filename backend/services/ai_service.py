@@ -22,7 +22,7 @@ async def call_ocr_api(image_pil, api_config):
         model=api_config['model_name'],
         messages=[{"role": "user", "content": [
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}},
-            {"type": "text", "text": "<image>\n<|grounding|>Convert the document to markdown."}
+            {"type": "text", "text": "<image>\n<|grounding|>Convert this document page into high-fidelity markdown. CRITICAL: Do NOT skip footnotes, page headers, or DOIs. Include all formulas and table data accurately."}
         ]}],
         api_key=api_config['api_key'],
         api_base=api_config['api_base'],

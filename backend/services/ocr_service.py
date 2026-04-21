@@ -63,18 +63,21 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         # --- 阶段 2: 结构化 JSON 提取 (多维智库卡片) ---
         print(f"[Task] Extracting DEFAULT metadata for: {title}")
         
-        # 1. 定义基础信息提取 Prompt (Default Tags)
+        # 1. 定义基础信息提取 Prompt (加强 DOI 与 脚注感知)
         default_prompt = """
-        Extract the following basic metadata from this academic paper markdown content. 
+        You are a highly precise academic metadata extractor.
+        Extract the following data from the markdown content. 
+        Note: DOIs and author details are often in footnotes or the very first page margins. 
+        
         Return a JSON object with these EXACT keys:
-        - title: The full title of the paper
-        - authors: A list of all authors
-        - journal_or_conference: Where it was published
-        - date: Publication date (if available)
-        - doi: DOI string
-        - abstract: A concise 2-3 sentence summary of the abstract
-        - keywords: A list of 5-8 key terms
-        - summary: A 3-bullet point summary of 'what this paper wrote about/contributed'
+        - title: Full paper title
+        - authors: string of all authors (comma separated)
+        - journal_or_conference: Publication venue
+        - date: Year or full date
+        - doi: The DOI string (e.g., 10.1109/...)
+        - abstract: Concise 2-3 sentence abstract
+        - keywords: string of key terms
+        - summary: A 3-bullet point 'Why this matters' summary
         """
         
         config_service = ConfigService(db)
