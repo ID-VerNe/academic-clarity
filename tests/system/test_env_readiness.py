@@ -5,47 +5,34 @@ import unittest
 
 class TestEnvironmentReadiness(unittest.TestCase):
     def test_frontend_port_availability(self):
-        """验证前端端口 30517 或备用端口是否可用 (Vite strictPort=false)"""
-        base_port = 30517
-        host = '127.0.0.1'
-        found_available = False
-        errors = []
-
-        for port in range(base_port, base_port + 5):
+        """验证前端端口范围 (30517-30521) 是否有可用出口"""
+        available = False
+        for port in range(30517, 30522):
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind((host, port))
+                s.bind(('127.0.0.1', port))
                 s.close()
-                found_available = True
+                available = True
+                print(f"  Frontend port check passed: {port}")
                 break
-            except PermissionError:
-                errors.append(f"Port {port}: Permission Denied (EACCES)")
+            except:
                 continue
-            except OSError as e:
-                if e.errno == 10048: # WSAEADDRINUSE
-                    errors.append(f"Port {port}: In Use")
-                    continue
-                else:
-                    errors.append(f"Port {port}: OS Error {e.errno}")
-                    continue
-
-        if not found_available:
-            self.fail(f"Could not find an available port in range {base_port}-{base_port+4}. Errors: {errors}")
-        else:
-            print(f"  Frontend port check passed (found available port in range)")
+        self.assertTrue(available, "No available frontend ports in range 30517-30521")
 
     def test_backend_port_availability(self):
-        """验证后端端口 38391 是否可用"""
-        port = 38391
-        host = '127.0.0.1'
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((host, port))
-            s.close()
-        except Exception as e:
-            self.fail(f"Backend port {port} is blocked: {e}")
+        """验证后端端口范围 (38391-38395) 是否有可用出口"""
+        available = False
+        for port in range(38391, 38396):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.bind(('127.0.0.1', port))
+                s.close()
+                available = True
+                print(f"  Backend port check passed: {port}")
+                break
+            except:
+                continue
+        self.assertTrue(available, "No available backend ports in range 38391-38395")
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,7 +12,9 @@ import {
   RefreshCw,
   Zap,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ShieldAlert,
+  Search
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Document } from '../types';
@@ -69,6 +71,17 @@ export const Dashboard = ({
     }
   };
 
+  // 状态判定逻辑：基于情报完整度
+  const getDocStatus = (doc: Document) => {
+    const hasMarkdown = !!doc.ocr_markdown && doc.ocr_markdown.length > 10;
+    const hasMetadata = !!doc.metadata_json; // 这里假设 backend 已经把 Basic Insight 聚合进来了，或者前端判断状态
+
+    if (doc.ocr_status === 'processing' || doc.ocr_status === 'pending') return 'processing';
+    if (!hasMarkdown || doc.ocr_status === 'failed') return 'failed';
+    if (hasMarkdown && !hasMetadata) return 'partial'; // 有原文无情报 -> Warning
+    return 'completed'; // 全链路完成 -> Success
+  };
+
   return (
     <motion.main 
       initial={{ opacity: 0, y: 10 }}
@@ -88,13 +101,13 @@ export const Dashboard = ({
             </button>
             <button 
               onClick={(window as any).api.selectWorkspace}
-              className="p-1.5 mt-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors group relative"
+              className="p-1.5 mt-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
               title="Switch Workspace"
             >
               <FolderOpen className="w-5 h-5" />
             </button>
           </div>
-          <p className="text-slate-500 mt-1">Manage, OCR, and extract insights from your academic library.</p>
+          <p className="text-slate-500 mt-1">Unified view of your research intelligence and document status.</p>
         </div>
         <div className="flex gap-3">
           <button 
@@ -111,18 +124,16 @@ export const Dashboard = ({
       <AnimatePresence>
         {activeTasks.length > 0 && (
           <motion.section 
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
+            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
             <div className="bg-indigo-600 rounded-3xl p-6 text-white shadow-2xl shadow-indigo-200">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <Zap className="w-5 h-5 fill-indigo-300 text-indigo-300" />
-                  <h3 className="text-sm font-black uppercase tracking-widest">Processing Queue</h3>
+                  <h3 className="text-sm font-black uppercase tracking-widest">Active Processing Pipeline</h3>
                 </div>
-                <span className="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded-full">{activeTasks.length} Active Tasks</span>
+                <span className="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded-full">{activeTasks.length} Documents Active</span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {activeTasks.map(task => (
@@ -133,7 +144,7 @@ export const Dashboard = ({
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold truncate">{task.filename}</p>
                       <p className="text-[10px] text-indigo-200 font-medium uppercase tracking-tighter">
-                        {task.ocr_status === 'processing' ? 'Extracting Text & Math...' : 'Waiting in queue...'}
+                        AI is digesting content...
                       </p>
                     </div>
                   </div>
@@ -149,14 +160,7 @@ export const Dashboard = ({
         className={`w-full h-32 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-all group relative overflow-hidden
           ${isUploading ? 'bg-slate-50 border-slate-200 cursor-wait' : 'bg-white border-slate-200 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30'}`}
       >
-        <input 
-          type="file" 
-          ref={fileInputRef} 
-          className="hidden" 
-          accept=".pdf" 
-          onChange={handleFileChange}
-        />
-        
+        <input type="file" ref={fileInputRef} className="hidden" accept=".pdf" onChange={handleFileChange} />
         {isUploading ? (
           <div className="flex items-center gap-3">
             <Loader2 className="w-6 h-6 text-indigo-600 animate-spin" />
@@ -173,14 +177,19 @@ export const Dashboard = ({
       <section>
         <div className="flex items-center justify-between mb-8 border-b border-slate-200 pb-px">
           <div className="flex gap-8">
-            <button className="text-indigo-600 font-bold text-sm border-b-2 border-indigo-600 pb-4 -mb-px">Library</button>
-            <button className="text-slate-400 font-bold text-sm hover:text-slate-600 transition-colors pb-4">Processing</button>
-            <button className="text-slate-400 font-bold text-sm hover:text-slate-600 transition-colors pb-4">Failed</button>
+            <button className="text-indigo-600 font-bold text-sm border-b-2 border-indigo-600 pb-4 -mb-px">Research Library</button>
           </div>
-          <button className="flex items-center gap-1.5 text-slate-500 text-sm font-bold hover:text-slate-900 transition-colors pb-4">
-            <Filter className="w-4 h-4" />
-            Latest
-          </button>
+          <div className="flex items-center gap-4 pb-4">
+             <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase">
+                <div className="w-2 h-2 rounded-full bg-emerald-500" /> Complete
+             </div>
+             <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase">
+                <div className="w-2 h-2 rounded-full bg-amber-500" /> OCR Only
+             </div>
+             <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase">
+                <div className="w-2 h-2 rounded-full bg-rose-500" /> Pending/Fail
+             </div>
+          </div>
         </div>
 
         {docs.length === 0 ? (
@@ -188,81 +197,85 @@ export const Dashboard = ({
             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto">
               <BookOpen className="w-8 h-8 text-slate-300" />
             </div>
-            <p className="text-slate-400 font-medium">No documents. Drop a PDF to start.</p>
+            <p className="text-slate-400 font-medium">Your library is empty. Start by dropping a PDF.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {docs.map((doc) => (
-              <motion.div 
-                key={doc.id}
-                whileHover={{ y: -4, boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                className={`bg-white border border-slate-200/60 rounded-3xl p-6 flex flex-col justify-between hover:border-indigo-200 transition-all duration-300 group relative overflow-hidden cursor-pointer shadow-sm
-                  ${doc.ocr_status !== 'completed' ? 'opacity-90' : ''}`}
-                onClick={() => onSelectDoc(doc)}
-              >
-                <div className={`absolute top-0 left-0 w-full h-1 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500
-                  ${doc.ocr_status === 'completed' ? 'bg-indigo-500' : 'bg-amber-400'}`} />
-                
-                <div>
-                  <div className="flex items-center justify-between mb-5">
-                    <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border flex items-center gap-1.5
-                      ${doc.ocr_status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 
-                        doc.ocr_status === 'processing' ? 'bg-amber-50 text-amber-700 border-amber-100' : 
-                        doc.ocr_status === 'failed' ? 'bg-rose-50 text-rose-700 border-rose-100' :
-                        'bg-slate-50 text-slate-500 border-slate-100'}`}>
-                      {doc.ocr_status === 'completed' ? <CheckCircle2 className="w-2.5 h-2.5" /> : 
-                       doc.ocr_status === 'processing' ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> :
-                       doc.ocr_status === 'failed' ? <AlertCircle className="w-2.5 h-2.5" /> : null}
-                      {doc.ocr_status}
-                    </div>
-                    <div className="flex items-center gap-2">
-                       {doc.ocr_status === 'failed' && (
-                         <button 
-                           onClick={(e) => { e.stopPropagation(); onReprocess(doc.id); }}
-                           className="p-1 hover:bg-rose-100 rounded text-rose-600 transition-colors"
-                           title="Retry OCR"
-                         >
-                           <RefreshCw className="w-3 h-3" />
-                         </button>
-                       )}
-                    </div>
-                  </div>
+            {docs.map((doc) => {
+              const status = getDocStatus(doc);
+              return (
+                <motion.div 
+                  key={doc.id}
+                  whileHover={{ y: -4, boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                  className={`bg-white border-2 rounded-3xl p-6 flex flex-col justify-between hover:border-indigo-200 transition-all duration-300 group relative overflow-hidden cursor-pointer shadow-sm
+                    ${status === 'completed' ? 'border-emerald-100/50' : 
+                      status === 'partial' ? 'border-amber-100/50' : 
+                      status === 'processing' ? 'border-indigo-100 animate-pulse' : 'border-rose-100'}`}
+                  onClick={() => onSelectDoc(doc)}
+                >
+                  <div className={`absolute top-0 left-0 w-full h-1 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500
+                    ${status === 'completed' ? 'bg-emerald-500' : status === 'partial' ? 'bg-amber-400' : 'bg-rose-500'}`} />
                   
-                  <h3 className="font-serif text-lg text-slate-800 leading-snug line-clamp-2 group-hover:text-indigo-600 transition-colors mb-2">
-                    {doc.title || doc.filename}
-                  </h3>
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <FileText className="w-3 h-3" />
-                    <p className="text-[10px] font-medium truncate italic max-w-[150px]">
-                      {doc.filename}
-                    </p>
+                  <div>
+                    <div className="flex items-center justify-between mb-5">
+                      <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border flex items-center gap-1.5
+                        ${status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 
+                          status === 'partial' ? 'bg-amber-50 text-amber-700 border-amber-100' : 
+                          status === 'processing' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' :
+                          'bg-rose-50 text-rose-700 border-rose-100'}`}>
+                        {status === 'completed' ? <CheckCircle2 className="w-2.5 h-2.5" /> : 
+                         status === 'partial' ? <ShieldAlert className="w-2.5 h-2.5" /> :
+                         status === 'processing' ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> :
+                         <AlertCircle className="w-2.5 h-2.5" />}
+                        {status === 'partial' ? 'OCR READY' : status}
+                      </div>
+                      <div className="flex items-center gap-2">
+                         {(status === 'failed' || status === 'partial') && (
+                           <button 
+                             onClick={(e) => { e.stopPropagation(); onReprocess(doc.id); }}
+                             className="p-1.5 hover:bg-indigo-50 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"
+                             title="Retry All AI Steps"
+                           >
+                             <RefreshCw className="w-3.5 h-3.5" />
+                           </button>
+                         )}
+                      </div>
+                    </div>
+                    
+                    <h3 className="font-serif text-lg text-slate-800 leading-snug line-clamp-2 group-hover:text-indigo-600 transition-colors mb-2">
+                      {doc.title || doc.filename}
+                    </h3>
+                    <div className="flex items-center gap-2 text-slate-400">
+                      <FileText className="w-3 h-3" />
+                      <p className="text-[10px] font-medium truncate italic max-w-[150px]">
+                        {doc.filename}
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex items-center justify-between mt-10">
-                  <div className="flex flex-col">
-                    <span className="text-[8px] text-slate-300 uppercase font-black tracking-tighter">Acquired</span>
-                    <span className="text-[10px] text-slate-500 font-bold">
-                      {new Date(doc.added_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </span>
+                  <div className="flex items-center justify-between mt-10">
+                    <div className="flex flex-col">
+                      <span className="text-[8px] text-slate-300 uppercase font-black tracking-tighter">Acquired</span>
+                      <span className="text-[10px] text-slate-500 font-bold">
+                        {new Date(doc.added_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                    </div>
+                    <div className="flex gap-1">
+                      <button className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all duration-200 opacity-0 group-hover:opacity-100">
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onDelete(doc.id); }}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all duration-200 opacity-0 group-hover:opacity-100"
+                        title="Delete Document"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex gap-1">
-                    <button 
-                      className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all duration-200 opacity-0 group-hover:opacity-100"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); onDelete(doc.id); }}
-                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all duration-200 opacity-0 group-hover:opacity-100"
-                      title="Delete Document"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
           </div>
         )}
       </section>
@@ -271,10 +284,10 @@ export const Dashboard = ({
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Pipeline Active</span>
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Core Active</span>
           </div>
           <span className="text-[10px] text-slate-300">|</span>
-          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{docs.length} Items Indexed</span>
+          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{docs.length} Papers in Library</span>
         </div>
       </footer>
     </motion.main>

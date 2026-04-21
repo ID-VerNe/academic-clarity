@@ -213,5 +213,20 @@ async def chat_with_doc(request: ChatRequest):
         return {"response": f"AI Error: {str(e)}"}
 
 if __name__ == "__main__":
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 38391
-    uvicorn.run(app, host="127.0.0.1", port=port)
+    initial_port = int(sys.argv[1]) if len(sys.argv) > 1 else 38391
+    # 尝试 5 个连续端口，处理 EACCES 冲突
+    for port in range(initial_port, initial_port + 5):
+        try:
+            print(f"[Core] Starting production server on port {port}...")
+            # uvicorn.run 在某些环境下可能在 bind 失败时直接退出，
+            # 我们通过 socket 预检来确保端口可用
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(('127.0.0.1', port))
+            sock.close()
+            
+            uvicorn.run(app, host="127.0.0.1", port=port)
+            break
+        except OSError:
+            print(f"[Warn] Port {port} unavailable, skipping...")
+            continue

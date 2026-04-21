@@ -1,14 +1,15 @@
 # Academic Clarity - System Defaults
 # This file is for private use. Do not commit sensitive keys!
 
-# SiliconFlow API Key for DeepSeek-OCR
+# --- DeepSeek OCR (SiliconFlow) ---
 DEEPSEEK_API_KEY = "sk-..." 
-
-# Base URL for OCR and Extraction APIs
 API_BASE = "https://api.siliconflow.cn/v1"
+OCR_MODEL = "openai/deepseek-ai/DeepSeek-OCR"
 
-# Default Model for Metadata Extraction / Chat
-DEFAULT_MODEL = "openai/deepseek-ai/DeepSeek-OCR"
+# --- Local LLM (Metadata Extraction & Chat) ---
+LLM_API_KEY = "sk-copilot-sdk-default"
+LLM_API_BASE = "http://localhost:37210/v1"
+LLM_MODEL = "gpt-4.1"
 
 # Backend Port
 PORT = 38391

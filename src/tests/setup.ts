@@ -4,7 +4,7 @@ import { vi } from 'vitest';
 // Mock Electron window.api
 Object.defineProperty(window, 'api', {
   value: {
-    getPythonPort: vi.fn().mockResolvedValue(38391),
+    getPythonPort: vi.fn().mockResolvedValue(38392),
     getWorkspace: vi.fn().mockResolvedValue('C:/mock/workspace'),
     selectWorkspace: vi.fn().mockResolvedValue('C:/new/workspace'),
     onWorkspaceChanged: vi.fn().mockReturnValue(() => {}),

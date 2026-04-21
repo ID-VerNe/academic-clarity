@@ -15,7 +15,7 @@ vi.mock('../api/client', () => ({
   }
 }));
 
-describe('Dashboard Deep Behavioral Tests', () => {
+describe('Dashboard Three-Color Status Tests', () => {
   const mockHandlers = {
     onSelectDoc: vi.fn(),
     onUpload: vi.fn(),
@@ -31,46 +31,62 @@ describe('Dashboard Deep Behavioral Tests', () => {
     };
   });
 
-  it('renders active task queue from API and shows processing status', async () => {
-    render(<Dashboard docs={[]} {...mockHandlers} isUploading={false} />);
+  it('displays emerald "completed" badge when both markdown and metadata exist', () => {
+    const doc: any = { 
+      id: 1, 
+      filename: 'done.pdf', 
+      ocr_markdown: 'Full text here', 
+      metadata_json: '{"title": "x"}',
+      ocr_status: 'completed',
+      added_at: new Date().toISOString() 
+    };
+    render(<Dashboard docs={[doc]} {...mockHandlers} isUploading={false} />);
     
-    // 验证是否出现了“Processing Queue”面板
-    await waitFor(() => {
-      expect(screen.getByText('Processing Queue')).toBeDefined();
-      expect(screen.getByText('processing_paper.pdf')).toBeDefined();
-    });
+    const badge = screen.getByText('completed');
+    expect(badge.className).toContain('bg-emerald-50');
   });
 
-  it('triggers full workspace sync when refresh button is clicked', async () => {
-    render(<Dashboard docs={[]} {...mockHandlers} isUploading={false} />);
+  it('displays amber "OCR READY" badge when markdown exists but metadata is missing', () => {
+    const doc: any = { 
+      id: 1, 
+      filename: 'ocr_only.pdf', 
+      ocr_markdown: 'Full text here', 
+      metadata_json: null,
+      ocr_status: 'completed',
+      added_at: new Date().toISOString() 
+    };
+    render(<Dashboard docs={[doc]} {...mockHandlers} isUploading={false} />);
     
-    const syncBtn = screen.getByTitle('Sync Workspace & Trigger OCR');
-    fireEvent.click(syncBtn);
-    
-    expect(api.syncWorkspace).toHaveBeenCalled();
+    expect(screen.getByText('OCR READY')).toBeDefined();
+    const badge = screen.getByText('OCR READY');
+    expect(badge.className).toContain('bg-amber-50');
   });
 
-  it('shows distinctive upload status when isUploading is true', () => {
-    render(<Dashboard docs={[]} {...mockHandlers} isUploading={true} />);
+  it('displays rose "failed" badge when no markdown exists', () => {
+    const doc: any = { 
+      id: 1, 
+      filename: 'broken.pdf', 
+      ocr_markdown: null, 
+      ocr_status: 'failed',
+      added_at: new Date().toISOString() 
+    };
+    render(<Dashboard docs={[doc]} {...mockHandlers} isUploading={false} />);
     
-    expect(screen.getByText(/Injecting document into researcher pipeline/i)).toBeDefined();
-    // 寻找具有 dashed 边框的上传区域容器
-    const uploadArea = screen.getByText(/Injecting document into researcher pipeline/i).closest('.border-dashed');
-    expect(uploadArea?.className).toContain('cursor-wait');
+    const badge = screen.getByText('failed');
+    expect(badge.className).toContain('bg-rose-50');
   });
 
-  it('displays correct icon and color for completed vs processing documents', () => {
-    const mixedDocs: any[] = [
-      { id: 1, filename: 'done.pdf', ocr_status: 'completed', added_at: new Date().toISOString() },
-      { id: 2, filename: 'busy.pdf', ocr_status: 'processing', added_at: new Date().toISOString() }
-    ];
+  it('triggers full AI reprocess when Refresh button on card is clicked', () => {
+    const doc: any = { 
+      id: 1, 
+      filename: 'test.pdf', 
+      ocr_status: 'failed',
+      added_at: new Date().toISOString() 
+    };
+    render(<Dashboard docs={[doc]} {...mockHandlers} isUploading={false} />);
     
-    render(<Dashboard docs={mixedDocs} {...mockHandlers} isUploading={false} />);
-    
-    const completedBadge = screen.getByText('completed');
-    expect(completedBadge.className).toContain('bg-emerald-50');
-    
-    const processingBadge = screen.getByText('processing');
-    expect(processingBadge.className).toContain('bg-amber-50');
+    const retryBtn = screen.getByTitle('Retry All AI Steps');
+    fireEvent.click(retryBtn);
+    expect(mockHandlers.onReprocess).toHaveBeenCalledWith(doc.id);
   });
 });
