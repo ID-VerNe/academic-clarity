@@ -2,7 +2,11 @@
 node_modules/
 pnpm-lock.yaml
 
-# Build Outputs
+# Backend local config
+backend/config.py
+!backend/config.py.example
+
+# Build outputs
 dist/
 dist-electron/
 *.exe

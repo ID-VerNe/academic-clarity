@@ -1,0 +1,14 @@
+# Academic Clarity - System Defaults
+# This file is for private use. Do not commit sensitive keys!
+
+# SiliconFlow API Key for DeepSeek-OCR
+DEEPSEEK_API_KEY = "sk-..." 
+
+# Base URL for OCR and Extraction APIs
+API_BASE = "https://api.siliconflow.cn/v1"
+
+# Default Model for Metadata Extraction / Chat
+DEFAULT_MODEL = "openai/deepseek-ai/DeepSeek-OCR"
+
+# Backend Port
+PORT = 38391
