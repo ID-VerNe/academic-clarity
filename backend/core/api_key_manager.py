@@ -23,7 +23,7 @@ class KeyState:
 class KeyConfig:
     api_key: str
     api_base: str = "https://api.siliconflow.cn/v1"
-    model_name: str = "openai/deepseek-ai/DeepSeek-OCR"
+    model_name: str = ""
     max_concurrent: int = 5
     rpm_limit: int = 60
     tpm_limit: int = 100000

@@ -49,6 +49,8 @@ async def call_ocr_api(image, api_config):
         async def do_call(key_state: Optional[KeyState]):
             if not key_state:
                 return "OCR Failed: No available OCR API keys"
+            if not key_state.model_name:
+                return "OCR Failed: OCR_MODEL not configured in multi-key settings"
             try:
                 response = await asyncio.to_thread(
                     completion,
@@ -72,10 +74,14 @@ async def call_ocr_api(image, api_config):
         result = await _call_with_key_pool(ocr_pool, api_config, do_call)
         return result if result else "OCR Failed: No available OCR API keys"
     else:
+        model_name = api_config.get('model_name', '')
+        if not model_name:
+            print("[API] OCR Error: OCR_MODEL not configured")
+            return "OCR Failed: OCR_MODEL not configured in settings"
         try:
             response = await asyncio.to_thread(
                 completion,
-                model=api_config['model_name'],
+                model=model_name,
                 messages=[{"role": "user", "content": [
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}},
                     {"type": "text", "text": prompt}
@@ -97,6 +103,8 @@ async def call_chat_api(query, context, api_config):
         async def do_call(key_state: Optional[KeyState]):
             if not key_state:
                 return "Chat Error: No available LLM API keys"
+            if not key_state.model_name:
+                return "Chat Error: LLM_MODEL not configured in multi-key settings"
             try:
                 response = await asyncio.to_thread(
                     completion,
@@ -118,10 +126,13 @@ async def call_chat_api(query, context, api_config):
         result = await _call_with_key_pool(llm_pool, api_config, do_call)
         return result if result else "Chat Error: No available LLM API keys"
     else:
+        model_name = api_config.get('model_name', '')
+        if not model_name:
+            return "Chat Error: LLM_MODEL not configured in settings"
         try:
             response = await asyncio.to_thread(
                 completion,
-                model=api_config['model_name'],
+                model=model_name,
                 messages=[
                     {"role": "system", "content": "You are a specialized academic assistant. Answer based ONLY on the provided context."},
                     {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUERY:\n{query}"}
@@ -145,6 +156,8 @@ async def call_json_extraction_api(md_content, api_config, prompt_instructions):
         async def do_call(key_state: Optional[KeyState]):
             if not key_state:
                 return json.dumps({"error": "Extraction failed: No available LLM API keys"})
+            if not key_state.model_name:
+                return json.dumps({"error": "Extraction failed: LLM_MODEL not configured in multi-key settings"})
             try:
                 response = await asyncio.to_thread(
                     completion,
@@ -175,10 +188,13 @@ async def call_json_extraction_api(md_content, api_config, prompt_instructions):
         result = await _call_with_key_pool(llm_pool, api_config, do_call)
         return result if result else json.dumps({"error": "Extraction failed: No available LLM API keys"})
     else:
+        model_name = api_config.get('model_name', '')
+        if not model_name:
+            return json.dumps({"error": "Extraction failed: LLM_MODEL not configured in settings"})
         try:
             response = await asyncio.to_thread(
                 completion,
-                model=api_config['model_name'],
+                model=model_name,
                 messages=[
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": f"{prompt_instructions}\n\nCONTENT:\n{md_content}"}

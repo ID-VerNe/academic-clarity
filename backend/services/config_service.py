@@ -55,7 +55,7 @@ class ConfigService:
 
     def get_ocr_key_configs(self) -> List[KeyConfig]:
         default_base = self._get_val("API_BASE", "API_BASE", "https://api.siliconflow.cn/v1")
-        default_model = self._get_val("OCR_MODEL", "OCR_MODEL", "openai/deepseek-ai/DeepSeek-OCR")
+        default_model = self._get_val("OCR_MODEL", "OCR_MODEL", "")
         keys_json = self.db.get_config("OCR_API_KEYS", "")
         return self._parse_key_configs(keys_json, default_base, default_model)
     
@@ -88,7 +88,7 @@ class ConfigService:
         return {
             "api_key": self._get_val("DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY", ""),
             "api_base": self._get_val("API_BASE", "API_BASE", "https://api.siliconflow.cn/v1"),
-            "model_name": self._get_val("OCR_MODEL", "OCR_MODEL", "openai/deepseek-ai/DeepSeek-OCR")
+            "model_name": self._get_val("OCR_MODEL", "OCR_MODEL", "")
         }
 
     def get_extract_config(self):
