@@ -27,6 +27,7 @@ class AppState:
         self.workspace_path = ""
         self.db = None
         self.workspace_service = None
+        self.use_multi_key = False
 
     def initialize(self, path: str):
         if not os.path.exists(path):
@@ -34,7 +35,10 @@ class AppState:
         self.workspace_path = path
         self.db = Database(os.path.join(path, "library.db"))
         self.workspace_service = WorkspaceService(path, self.db)
+        config_service = ConfigService(self.db)
+        self.use_multi_key = config_service.initialize_key_manager()
         print(f"[Core] Active workspace: {path}")
+        print(f"[Core] Multi-key mode: {'enabled' if self.use_multi_key else 'disabled'}")
 
 state = AppState()
 
@@ -126,8 +130,24 @@ async def get_configs():
         "DEEPSEEK_API_KEY": state.db.get_config("DEEPSEEK_API_KEY", ""),
         "API_BASE": state.db.get_config("API_BASE", "https://api.siliconflow.cn/v1"),
         "WORKSPACE_PATH": state.workspace_path,
-        "TABLE_STYLE": state.db.get_config("TABLE_STYLE", "three-line")
+        "TABLE_STYLE": state.db.get_config("TABLE_STYLE", "three-line"),
+        "USE_MULTI_KEY": state.use_multi_key
     }
+
+@app.get("/configs/multi-keys")
+async def get_multi_key_stats():
+    from core.api_key_manager import api_key_manager
+    return {
+        "enabled": state.use_multi_key,
+        "keys": api_key_manager.get_key_stats()
+    }
+
+@app.post("/configs/multi-keys")
+async def update_multi_keys(multi_keys: str = Query(...)):
+    state.db.set_config("MULTI_API_KEYS", multi_keys)
+    config_service = ConfigService(state.db)
+    state.use_multi_key = config_service.initialize_key_manager()
+    return {"success": True, "use_multi_key": state.use_multi_key}
 
 @app.post("/configs")
 async def set_config(key: str = Query(...), value: str = Query(...)):
@@ -186,6 +206,8 @@ async def trigger_custom_extraction(doc_id: int, request: MetadataRequest):
     
     config_service = ConfigService(state.db)
     extract_api_config = config_service.get_extract_config()
+    if state.use_multi_key:
+        extract_api_config['_use_multi_key'] = True
     
     try:
         from services.ai_service import call_json_extraction_api
@@ -211,6 +233,8 @@ async def chat_with_doc(request: ChatRequest):
         return {"response": "OCR results not available."}
     config_service = ConfigService(state.db)
     api_config = config_service.get_chat_config()
+    if state.use_multi_key:
+        api_config['_use_multi_key'] = True
     try:
         response = await call_chat_api(request.query, doc['ocr_markdown'], api_config)
         return {"response": response}

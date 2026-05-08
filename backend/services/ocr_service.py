@@ -82,13 +82,8 @@ async def process_page_task(page_idx, total_pages, pix_data, api_config, retries
                 return f"\n\n> [Error on Page {page_idx + 1}]\n\n"
 
 async def run_full_ocr_workflow(doc_id, pdf_path, db):
-    """
-    全链路任务执行器：OCR -> Markdown -> Basic Insight。
-    由 task_manager 的 Worker 调用。
-    """
     print(f"[TaskHub] Starting Full Pipeline for: {os.path.basename(pdf_path)}")
     try:
-        # Check if file is empty
         if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
             raise EmptyFileError(f"File {pdf_path} is empty or missing.")
 
@@ -97,12 +92,14 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         total_pages = len(doc)
         
         config_service = ConfigService(db)
+        use_multi_key = config_service.initialize_key_manager()
         ocr_api_config = config_service.get_ocr_config()
+        if use_multi_key:
+            ocr_api_config['_use_multi_key'] = True
 
-        if not ocr_api_config["api_key"]:
+        if not ocr_api_config["api_key"] and not use_multi_key:
             raise Exception("API Key missing")
 
-        # 1. OCR 阶段
         page_tasks = []
         page_images = []
         for i in range(total_pages):
@@ -111,7 +108,6 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
             try:
                 page_images.append(Image.open(BytesIO(pix_bytes)).convert("RGB"))
             except Exception:
-                # Test doubles may provide non-image bytes; keep pipeline deterministic.
                 page_images.append(Image.new("RGB", (1, 1), "white"))
             page_tasks.append(process_page_task(i, total_pages, pix_bytes, ocr_api_config))
         
@@ -127,7 +123,6 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         cleaned_markdown = clean_ocr_markdown(raw_full_content)
         title = extract_title_from_markdown(raw_full_content)
         
-        # 2. 基础情报提取阶段 (极致加固 DOI 提取逻辑)
         print(f"[TaskHub] Stage 2: Deep Extraction for {title}")
         default_prompt = """
         You are a world-class academic metadata curator. 
@@ -151,17 +146,17 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         """
         
         extract_api_config = config_service.get_extract_config()
+        if use_multi_key:
+            extract_api_config['_use_multi_key'] = True
         try:
             metadata_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, default_prompt)
             db.add_document_metadata(doc_id, "Basic Insight", metadata_json)
         except Exception as e:
             print(f"[TaskHub] Metadata Stage Error: {e}")
 
-        # 3. 最终落库
         db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, raw=raw_full_content, title=title)
         print(f"[TaskHub] Pipeline SUCCESS: {title}")
     except Exception as e:
         print(f"[TaskHub] Pipeline CRITICAL ERROR: {e}")
         db.update_document_ocr(doc_id, "failed")
-        # 抛出异常由 TaskManager 处理队尾重试
         raise e
