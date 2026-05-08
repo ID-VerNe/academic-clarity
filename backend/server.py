@@ -1,6 +1,7 @@
 import os
 import sys
 import shutil
+import urllib.parse
 import uvicorn
 import asyncio
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Request
@@ -10,7 +11,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
-# --- Path Configuration ---
+try:
+    from backend.config import SecurityConfig, ServerConfig
+except ImportError:
+    from config import SecurityConfig, ServerConfig
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 
@@ -50,24 +55,19 @@ state = AppState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. 初始化物理路径
     initial_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(BASE_DIR), "workspace_default")
     state.initialize(initial_path)
-    
-    # 2. 启动 10 并发任务中枢
+
     await task_hub.start_workers(state)
-    
+
     yield
 
 app = FastAPI(title="Academic Clarity Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:30517",
-        "http://127.0.0.1:30517",
-    ],
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origins=SecurityConfig.ALLOWED_ORIGINS,
+    allow_origin_regex=SecurityConfig.ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -75,18 +75,28 @@ app.add_middleware(
 
 @app.get("/files/{filename}")
 async def serve_file(filename: str):
-    import urllib.parse
     decoded_filename = urllib.parse.unquote(filename)
-    file_path = os.path.join(state.workspace_path, decoded_filename)
-    if os.path.exists(file_path):
-        return FileResponse(
-            file_path, 
-            media_type='application/pdf',
-            headers={"Content-Disposition": f"inline; filename={filename}"}
-        )
-    raise HTTPException(status_code=404)
 
-# --- Schemas ---
+    if '..' in decoded_filename or decoded_filename.startswith('/') or decoded_filename.startswith('\\'):
+        raise HTTPException(status_code=400, detail="Invalid filename: path traversal detected")
+
+    file_path = os.path.normpath(os.path.join(state.workspace_path, decoded_filename))
+
+    if not file_path.startswith(os.path.normpath(state.workspace_path)):
+        raise HTTPException(status_code=403, detail="Access denied: file outside workspace")
+
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if os.path.getsize(file_path) == 0:
+        raise HTTPException(status_code=400, detail="File is empty")
+
+    return FileResponse(
+        file_path,
+        media_type='application/pdf',
+        headers={"Content-Disposition": f"inline; filename={filename}"}
+    )
+
 class ChatRequest(BaseModel):
     doc_id: int
     query: str
@@ -94,8 +104,6 @@ class ChatRequest(BaseModel):
 class MetadataRequest(BaseModel):
     label: str
     prompt: str
-
-# --- API Endpoints ---
 
 @app.get("/health")
 async def health():
@@ -107,14 +115,15 @@ async def list_active_tasks():
     docs = state.db.get_all_documents()
     return [d for d in docs if d['ocr_status'] in ['pending', 'processing']]
 
+@app.get("/tasks/stats")
+async def get_task_stats():
+    return task_hub.get_stats()
+
 @app.post("/workspace/sync")
 async def sync_workspace():
-    """
-    全自动同步：扫描并推入 10 并发任务池
-    """
     state.workspace_service.scan_and_sync()
     docs = state.db.get_all_documents()
-    
+
     triggered = 0
     for d in docs:
         metadata = state.db.get_document_metadata(d['id'])
@@ -124,10 +133,9 @@ async def sync_workspace():
         if not has_markdown or not has_basic or d['ocr_status'] in ['pending', 'failed']:
             stored_path = d.get('stored_path')
             if stored_path and os.path.exists(stored_path):
-                # 推入 10 并发 Task Hub
                 await task_hub.add_task(d['id'], run_full_ocr_workflow, stored_path)
                 triggered += 1
-    
+
     return {"success": True, "triggered": triggered}
 
 @app.get("/configs")
@@ -191,12 +199,11 @@ async def add_document(file: UploadFile = File(...)):
         name, ext = os.path.splitext(filename)
         dest_path = os.path.join(state.workspace_path, f"{name}_{counter}{ext}")
         counter += 1
-    
+
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    
+
     doc_id = state.db.add_document(filename, "uploaded", dest_path)
-    # 推入并行任务池
     await task_hub.add_task(doc_id, run_full_ocr_workflow, dest_path)
     return {"success": True, "doc_id": doc_id}
 
@@ -211,7 +218,7 @@ async def get_document_pdf(doc_id: int):
 async def delete_document(doc_id: int):
     doc = state.db.get_document(doc_id)
     if doc:
-        if os.path.exists(doc['stored_path']): 
+        if os.path.exists(doc['stored_path']):
             try: os.remove(doc['stored_path'])
             except: pass
         state.db.delete_document(doc_id)
@@ -227,12 +234,12 @@ async def trigger_custom_extraction(doc_id: int, request: MetadataRequest):
     doc = state.db.get_document(doc_id)
     if not doc or not doc.get('ocr_markdown'):
         raise HTTPException(status_code=400)
-    
+
     config_service = ConfigService(state.db)
     extract_api_config = config_service.get_extract_config()
     if state.llm_multi_key:
         extract_api_config['_use_multi_key'] = True
-    
+
     try:
         from services.ai_service import call_json_extraction_api
         metadata_json = await call_json_extraction_api(doc['ocr_markdown'], extract_api_config, request.prompt)
@@ -246,7 +253,6 @@ async def reprocess_document(doc_id: int):
     doc = state.db.get_document(doc_id)
     if not doc:
         raise HTTPException(status_code=404)
-    # 强制重试
     await task_hub.add_task(doc_id, run_full_ocr_workflow, doc['stored_path'])
     return {"success": True}
 
@@ -266,8 +272,8 @@ async def chat_with_doc(request: ChatRequest):
         return {"response": f"AI Error: {str(e)}"}
 
 if __name__ == "__main__":
-    initial_port = int(sys.argv[1]) if len(sys.argv) > 1 else 38392
-    for port in range(initial_port, initial_port + 5):
+    initial_port = int(sys.argv[1]) if len(sys.argv) > 1 else ServerConfig.DEFAULT_PORT
+    for port in range(initial_port, initial_port + ServerConfig.MAX_PORT_RANGE):
         try:
             print(f"[Core] Starting server on port {port}...")
             import socket
