@@ -3,7 +3,7 @@
 **审查日期**: 2026-05-08
 **审查范围**: 后端核心服务、前端组件、API 层、数据库层
 **审查方法**: 静态代码分析 + 架构审查
-**最后更新**: 2026-05-08 (第五轮修复已应用)
+**最后更新**: 2026-05-08 (可观测性基础设施已完成)
 
 ---
 
@@ -575,7 +575,149 @@ PR描述原本提到添加 `backend/config.py`，但实际实现使用 `backend/
 
 ---
 
+## 九、可观测性基础设施 (Phase 1 & 2 完成)
+
+### 9.1 统一日志系统 ✅ 已实现
+
+**位置**: [backend/utils/logger.py](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\backend\utils\logger.py)
+
+**功能特性**:
+- 结构化JSON日志输出
+- 多级别日志支持 (DEBUG/INFO/WARNING/ERROR/CRITICAL)
+- 按模块分类 (core/api/task/database/keypool)
+- 文件轮转支持 (RotatingFileHandler)
+- 带颜色的控制台输出
+- 专用日志方法 (log_api_call, log_task, log_key_pool, log_database)
+
+**使用示例**:
+```python
+from utils.logger import get_logger
+logger = get_logger("task")
+
+logger.info("Task started", doc_id=123)
+logger.log_task("completed", doc_id=123, worker_id=1)
+```
+
+---
+
+### 9.2 健康检查端点 ✅ 已实现
+
+**端点**:
+- `GET /health` - 基础健康检查
+- `GET /health/detailed` - 详细组件检查 (返回HTTP 503如果unhealthy)
+
+**检查组件**:
+- database: 数据库连接和文档数量
+- workspace: 工作区目录和PDF文件数量
+- api_keys: API密钥池健康状态
+- task_queue: 任务队列状态
+- system: CPU、内存、磁盘使用率
+- redis: Redis连接状态 (fallback到内存缓存)
+- websocket: WebSocket连接数
+
+---
+
+### 9.3 Prometheus 指标 ✅ 已实现
+
+**位置**: [backend/utils/metrics.py](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\backend\utils\metrics.py)
+
+**端点**:
+- `GET /metrics` - Prometheus格式指标
+- `GET /metrics/summary` - 指标摘要JSON
+
+**指标类型**:
+- api_requests_total (Counter): API请求总数
+- api_request_duration_seconds (Histogram): 请求延迟
+- tasks_total (Counter): 任务处理总数
+- tasks_in_progress (Gauge): 进行中任务数
+- tasks_queued (Gauge): 队列中任务数
+- api_key_usage (Gauge): API密钥使用率
+- database_operations_seconds (Histogram): 数据库操作延迟
+- ocr_pages_processed_total (Counter): OCR页面处理数
+
+---
+
+### 9.4 Redis 缓存层 ✅ 已实现
+
+**位置**: [backend/utils/cache.py](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\backend\utils\cache.py)
+
+**特性**:
+- Redis连接 + 自动回退到内存缓存
+- 分类缓存: DocumentCache, MetadataCache, KeyPoolCache
+- TTL自动过期
+- LRU淘汰策略 (内存缓存模式)
+
+**使用示例**:
+```python
+from utils.cache import init_cache, get_cache
+
+cache = init_cache(redis_host="localhost")
+cache.documents.set_document(doc_id, doc_data)
+doc = cache.documents.get_document(doc_id)
+```
+
+---
+
+### 9.5 WebSocket 实时推送 ✅ 已实现
+
+**位置**: [backend/utils/websocket.py](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\backend\utils\websocket.py)
+
+**端点**: `WS /ws`
+
+**事件类型**:
+- task_started, task_progress, task_completed, task_failed
+- doc_added, doc_updated, doc_deleted
+- ocr_status_change, key_pool_update
+- system_status, heartbeat
+
+**使用示例**:
+```python
+from utils.websocket import ws_manager
+
+await ws_manager.send_task_update(doc_id, "processing", 50, "OCR in progress")
+await ws_manager.send_document_update("added", doc_id, doc_data)
+```
+
+---
+
+### 9.6 优先级队列 ✅ 已实现
+
+**位置**: [backend/core/priority_queue.py](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\backend\core\priority_queue.py)
+
+**特性**:
+- 5级优先级: CRITICAL(0), HIGH(1), NORMAL(2), LOW(3), BACKGROUND(4)
+- 死信队列 (Dead Letter Queue)
+- 延迟任务调度
+- 按文档ID去重
+
+**使用示例**:
+```python
+from core.priority_queue import TaskPriority
+
+await priority_task_hub.add_task(
+    doc_id, run_full_ocr_workflow,
+    priority=TaskPriority.HIGH,
+    force=True
+)
+```
+
+---
+
+## 十、长期架构设计文档 ✅ 已创建
+
+**位置**: [LONG_TERM_ARCHITECTURE.md](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\LONG_TERM_ARCHITECTURE.md)
+
+**内容包括**:
+- 微服务架构拆分方案 (API Gateway + 多个Service)
+- 消息队列设计 (RabbitMQ/Kafka Topic设计)
+- 分布式任务调度 (Celery + Kubernetes)
+- 实施路线图 (Phase 1-5)
+- 技术栈建议 (当前 → 目标)
+
+---
+
 **报告生成时间**: 2026-05-08
 **修复完成时间**: 2026-05-08
+**可观测性基础设施**: 已完成 ✅
 **审查者**: Code Review Agent
 **下一步行动**: 手动验证并合并到 main 分支
