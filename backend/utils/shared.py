@@ -231,15 +231,22 @@ class Once:
 
             self._executed = True
             try:
-                if asyncio.iscoroutinefunction(func):
-                    import asyncio
-                    self._result = asyncio.get_event_loop().run_until_complete(func(*args, **kwargs))
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    future = loop.create_task(self._run_async(func, args, kwargs))
+                    self._result = future
                 else:
-                    self._result = func(*args, **kwargs)
+                    if asyncio.iscoroutinefunction(func):
+                        self._result = loop.run_until_complete(func(*args, **kwargs))
+                    else:
+                        self._result = func(*args, **kwargs)
                 return self._result
             except Exception as e:
                 self._error = e
                 raise
+
+    async def _run_async(self, func: Callable, args: tuple, kwargs: dict):
+        return await func(*args, **kwargs)
 
 
 @asynccontextmanager

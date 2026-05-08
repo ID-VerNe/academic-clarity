@@ -127,9 +127,6 @@ class PriorityTaskQueue:
                 task = self._heap[0]
 
                 if not task.is_ready():
-                    wait_time = task.scheduled_at - time.time()
-                    if wait_time > 0:
-                        pass
                     return None
 
                 task = heapq.heappop(self._heap)
