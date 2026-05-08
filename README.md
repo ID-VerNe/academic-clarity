@@ -141,7 +141,9 @@ scripts/run_tests.bat
 
 ## 许可证
 
-MIT License
+GNU General Public License v3.0 (GPLv3)
+
+这是一个 **copyleft** 许可证，要求任何使用、修改或分发此软件的衍生作品必须同样以 GPLv3 许可证开源。详细内容请参见 [LICENSE](LICENSE) 文件。
 
 ---
 
