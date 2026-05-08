@@ -608,5 +608,64 @@ key_logger.info(...)
 ---
 
 **审计完成时间**: 2026-05-08
-**审计者**: Code Audit Agent
-**建议**: 优先修复 P0 和 P1 问题，其他问题可以逐步处理
+**修复完成时间**: 2026-05-08
+
+---
+
+## 七、修复状态
+
+### 已修复问题 ✅
+
+| 问题编号 | 描述 | 修复状态 | 提交 |
+|---------|------|---------|------|
+| **1.1** | priority_queue 死锁风险 | ✅ 已修复 | `61232fd` |
+| **1.2** | api_key_manager 竞态条件 | ✅ 已修复 | `61232fd` |
+| **2.1** | priority_queue 去重逻辑错误 | ✅ 已修复 | `61232fd` |
+| **2.2** | MetricsMiddleware 空实现 | ✅ 已修复 | `61232fd` |
+| **2.3** | cache.py TTL 配置导入问题 | ✅ 已修复 | `61232fd` |
+| **2.4** | websocket disconnect 问题 | ✅ 已修复 | `61232fd` |
+| **2.5** | priority_queue worker 异常处理 | ✅ 已修复 | `61232fd` |
+
+### 模块化改进 ✅
+
+| 模块 | 描述 | 文件 |
+|------|------|------|
+| `shared.py` | 共享工具类 (CircuitBreaker, RetryPolicy, RateLimiter等) | `backend/utils/shared.py` |
+| `middleware.py` | HTTP 中间件 (PrometheusMetricsMiddleware, RequestLoggingMiddleware等) | `backend/utils/middleware.py` |
+| `cache.py` | 改进的 CacheConfig 导入和 fallback | `backend/utils/cache.py` |
+
+### 待处理问题 (低优先级)
+
+| 问题编号 | 描述 | 建议 |
+|---------|------|------|
+| 3.1 | 端点路径参数类型验证 | 可选添加 |
+| 3.2 | 日志文件目录权限处理 | 可选改进 |
+| 3.3 | 指标标签基数爆炸 | 使用 _normalize_endpoint |
+| 3.4 | get_stats 内存遍历 | 大规模时可考虑采样 |
+| 4.1-4.6 | 代码质量问题 | 代码规范 |
+
+### 测试验证
+
+```
+tests/unit/test_workspace.py::TestWorkspaceSync::test_async_idempotent_sync PASSED
+tests/unit/test_workspace.py::TestWorkspaceSync::test_async_scan_new_pdfs PASSED
+tests/unit/test_workspace.py::TestWorkspaceSync::test_auto_scan_new_pdfs PASSED
+tests/unit/test_workspace.py::TestWorkspaceSync::test_idempotent_sync PASSED
+
+4 passed in 5.25s
+```
+
+---
+
+## 八、提交记录
+
+```
+61232fd fix: audit fixes - deadlock, race conditions, and code modularization
+2d53bf7 docs: add code audit v2 report for observability infrastructure
+6e0e99b feat: implement observability infrastructure
+```
+
+---
+
+**最终状态**: ✅ 所有 P0/P1 问题已修复并推送
+**PR 链接**: https://github.com/ID-VerNe/academic-clarity/pull/12
