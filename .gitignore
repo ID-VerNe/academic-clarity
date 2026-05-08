@@ -54,3 +54,9 @@ tests/ocr_lab/output/
 
 # Build artifacts
 academic-clarity-source.zip
+
+# Handoff documents
+handoff-*.md
+
+# Plans
+plans/
