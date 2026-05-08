@@ -3,7 +3,7 @@
 **审查日期**: 2026-05-08
 **审查范围**: 后端核心服务、前端组件、API 层、数据库层
 **审查方法**: 静态代码分析 + 架构审查
-**最后更新**: 2026-05-08 (修复已全部应用)
+**最后更新**: 2026-05-08 (第五轮修复已应用)
 
 ---
 
@@ -427,15 +427,16 @@ const validateKeyConfig = (key: KeyConfig, index: number): ValidationError[] => 
 
 | 文件路径 | 修改类型 | 主要变更 |
 |---|:---:|---|
-| backend/config.py | ✨ 新增 | 统一配置常量 |
-| backend/core/api_key_manager.py | 🔧 修改 | 修复死锁、添加配置常量 |
-| backend/core/task_manager.py | 🔧 修改 | 指数退避、失败追踪 |
+| backend/constants.py | ✨ 新增 | 统一配置常量（替代原 config.py 避免与用户配置冲突） |
+| backend/core/api_key_manager.py | 🔧 修改 | 修复死锁、添加超时和RPM/TPM检查 |
+| backend/core/task_manager.py | 🔧 修改 | 指数退避、失败追踪、force参数 |
 | backend/database.py | 🔧 修改 | 线程安全写锁 |
 | backend/services/ai_service.py | 🔧 修改 | 错误处理、超时控制 |
-| backend/services/ocr_service.py | 🔧 修改 | 页面错误处理 |
+| backend/services/ocr_service.py | 🔧 修改 | 页面错误处理、部分失败记录 |
 | backend/services/workspace_service.py | 🔧 修改 | 异步扫描方法 |
-| backend/server.py | 🔧 修改 | 路径遍历防护 |
-| src/components/SettingsModal.tsx | 🔧 修改 | 表单验证 |
+| backend/server.py | 🔧 修改 | 路径遍历防护、Windows兼容 |
+| src/components/SettingsModal.tsx | 🔧 修改 | 表单验证、removeKey修复 |
+| tests/unit/test_workspace.py | 🔧 修改 | 添加async_scan_and_sync单元测试 |
 | CODE_REVIEW_REPORT.md | 🔧 修改 | 本报告 |
 
 ---
@@ -482,14 +483,87 @@ python tests/security/test_final_audit.py
 
 ---
 
-## 七、后续优化建议
+## 七、第五轮 Copilot 审查修复 (2026-05-08)
 
-### 7.1 短期（建议1-2周内）
+### 7.1 acquire_key 无限阻塞问题 ✅ 已修复
+
+**位置**: [backend/core/api_key_manager.py#L138-173](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\backend\core\api_key_manager.py#L138-L173)
+
+**问题**: 原实现使用无限 `while True` 循环，在所有密钥都繁忙时会永久阻塞
+
+**修复方案**:
+1. 添加 `KeyPoolConfig.ACQUIRE_TIMEOUT`（默认5秒）限制获取密钥的最大等待时间
+2. 添加 `_check_rate_limits_internal()` 在预留key前检查RPM/TPM限制
+3. 优化sleep时间，避免超时前的不必要等待
+
+**修复后代码**:
+```python
+async def acquire_key(self) -> Optional[KeyState]:
+    start_time = time.time()
+    while True:
+        if time.time() - start_time > KeyPoolConfig.ACQUIRE_TIMEOUT:
+            print(f"[KeyPool:{self.service_name}] Timeout acquiring key")
+            return None
+        # ... 收集候选key ...
+        for state in candidates:
+            async with state.lock:
+                if state.active_requests >= state.max_concurrent:
+                    continue
+                if not await self._check_rate_limits_internal(state):  # 检查RPM/TPM
+                    continue
+                state.active_requests += 1
+                return state
+        sleep_time = min(KeyPoolConfig.RETRY_INTERVAL, KeyPoolConfig.ACQUIRE_TIMEOUT - elapsed)
+        await asyncio.sleep(sleep_time)
+```
+
+---
+
+### 7.2 OCR completed_with_errors 状态问题 ✅ 已修复
+
+**位置**: [backend/services/ocr_service.py#L194-199](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\backend\services\ocr_service.py#L194-L199)
+
+**问题**: 前端 OCRStatus 类型不包含 `completed_with_errors`，引入新状态会破坏现有代码
+
+**修复方案**: 使用 `completed` 状态 + metadata 记录部分失败信息
+
+**修复后代码**:
+```python
+if failed_pages:
+    print(f"[TaskHub] Pipeline completed with failures: {len(failed_pages)} pages failed")
+    db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, ...)
+    import json
+    db.add_document_metadata(doc_id, "OCR Failures", json.dumps({"failed_pages": failed_pages, "total_pages": total_pages}))
+else:
+    db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, ...)
+```
+
+---
+
+### 7.3 async_scan_and_sync 单元测试 ✅ 已添加
+
+**位置**: [tests/unit/test_workspace.py](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\tests\unit\test_workspace.py)
+
+**新增测试**:
+- `test_async_scan_new_pdfs`: 验证异步扫描正确检测新增PDF
+- `test_async_idempotent_sync`: 验证重复调用的幂等性
+
+---
+
+### 7.4 常量模块命名澄清 ✅ 已更新
+
+PR描述原本提到添加 `backend/config.py`，但实际实现使用 `backend/constants.py`（避免与用户配置文件冲突）。已在文档中澄清。
+
+---
+
+## 八、后续优化建议
+
+### 8.1 短期（建议1-2周内）
 1. 添加详细的日志记录
 2. 实现健康检查端点
 3. 添加 Prometheus 指标导出
 
-### 7.2 中期（建议1个月）
+### 8.2 中期（建议1个月）
 1. 实现 Redis 缓存层
 2. 添加 WebSocket 实时进度推送
 3. 实现任务优先级队列
