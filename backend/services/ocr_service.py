@@ -194,7 +194,7 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         if failed_pages:
             status_note = f" (Partial: {len(failed_pages)} pages failed: {failed_pages})"
             print(f"[TaskHub] Pipeline completed with failures: {status_note}")
-            db.update_document_ocr(doc_id, "completed_with_errors", markdown=cleaned_markdown, raw=raw_full_content, title=title)
+            db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, raw=raw_full_content, title=title)
             import json
             db.add_document_metadata(doc_id, "OCR Failures", json.dumps({"failed_pages": failed_pages, "total_pages": total_pages}))
         else:

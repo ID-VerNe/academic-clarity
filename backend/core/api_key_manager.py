@@ -137,7 +137,13 @@ class ServiceKeyPool:
 
     async def acquire_key(self) -> Optional[KeyState]:
         """获取密钥并原子性地增加活跃请求计数"""
+        start_time = time.time()
+
         while True:
+            if time.time() - start_time > KeyPoolConfig.ACQUIRE_TIMEOUT:
+                print(f"[KeyPool:{self.service_name}] Timeout acquiring key after {KeyPoolConfig.ACQUIRE_TIMEOUT}s")
+                return None
+
             candidates = []
             async with self._async_lock:
                 checked_keys = 0
@@ -151,14 +157,35 @@ class ServiceKeyPool:
 
             for state in candidates:
                 async with state.lock:
-                    if state.active_requests < state.max_concurrent:
-                        state.active_requests += 1
-                        state.last_used = time.time()
-                        self._request_times[state.key].append(time.time())
-                        return state
+                    if state.active_requests >= state.max_concurrent:
+                        continue
+                    if not await self._check_rate_limits_internal(state):
+                        continue
+                    state.active_requests += 1
+                    state.last_used = time.time()
+                    self._request_times[state.key].append(time.time())
+                    return state
 
-            await asyncio.sleep(KeyPoolConfig.RETRY_INTERVAL)
+            sleep_time = min(KeyPoolConfig.RETRY_INTERVAL, KeyPoolConfig.ACQUIRE_TIMEOUT - (time.time() - start_time))
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+
         return None
+
+    async def _check_rate_limits_internal(self, state: KeyState) -> bool:
+        """内部速率限制检查（用于预留时）"""
+        current_time = time.time()
+
+        recent_requests = [t for t in self._request_times[state.key] if current_time - t < 60]
+        if len(recent_requests) >= state.rpm_limit:
+            return False
+
+        recent_tokens = [(t, c) for t, c in self._token_counts[state.key] if current_time - t < 60]
+        recent_token_count = sum(c for _, c in recent_tokens)
+        if recent_token_count >= state.tpm_limit:
+            return False
+
+        return True
 
     async def release_key(self, state: KeyState, tokens_used: int = 0):
         """释放密钥"""

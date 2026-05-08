@@ -352,10 +352,10 @@ response = await asyncio.to_thread(
 
 ### 4.1 统一配置常量 ✅ 已修复
 
-**位置**: [backend/config.py](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\backend\config.py)
+**位置**: [backend/constants.py](file:///c:\Users\VerNe\Downloads\Documents\academic-clarity\backend\constants.py)
 
 **修复方案**:
-创建统一的配置文件管理所有魔法数字
+创建统一的配置文件管理所有魔法数字（使用 constants.py 避免与用户配置文件冲突）
 
 **配置类**:
 ```python
