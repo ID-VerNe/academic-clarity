@@ -110,12 +110,12 @@ class PriorityTaskQueue:
         )
         return await self.enqueue(task)
 
-    async def _remove_task_internal(self, task_id: str) -> bool:
+    async def _remove_task_internal(self, task_id: str) -> Optional[QueuedTask]:
         if task_id in self._tasks_by_id:
             task = self._tasks_by_id.pop(task_id)
             self._tasks_by_doc_id.pop(task.doc_id, None)
-            return True
-        return False
+            return task
+        return None
 
     async def dequeue(self, timeout: float = 1.0) -> Optional[QueuedTask]:
         while True:

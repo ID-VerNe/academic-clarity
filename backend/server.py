@@ -5,7 +5,7 @@ import urllib.parse
 import uvicorn
 import asyncio
 import time
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles

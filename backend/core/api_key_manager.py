@@ -191,21 +191,6 @@ class ServiceKeyPool:
 
         return None
 
-    async def _check_rate_limits_internal(self, state: KeyState) -> bool:
-        """内部速率限制检查（用于预留时）"""
-        current_time = time.time()
-
-        recent_requests = [t for t in self._request_times[state.key] if current_time - t < 60]
-        if len(recent_requests) >= state.rpm_limit:
-            return False
-
-        recent_tokens = [(t, c) for t, c in self._token_counts[state.key] if current_time - t < 60]
-        recent_token_count = sum(c for _, c in recent_tokens)
-        if recent_token_count >= state.tpm_limit:
-            return False
-
-        return True
-
     async def release_key(self, state: KeyState, tokens_used: int = 0):
         """释放密钥"""
         async with state.lock:

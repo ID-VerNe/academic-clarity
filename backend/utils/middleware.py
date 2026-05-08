@@ -120,15 +120,12 @@ class CORSCustomMiddleware:
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """简单的速率限制中间件"""
 
-    _request_counts: dict[str, list] = {}
-    _counts_lock = asyncio.Lock()
-    WINDOW_SECONDS = 60
-    MAX_REQUESTS = 1000
-
     def __init__(self, app: ASGIApp, max_requests: int = None, window_seconds: int = None):
         super().__init__(app)
-        self.max_requests = max_requests or self.MAX_REQUESTS
-        self.window_seconds = window_seconds or self.WINDOW_SECONDS
+        self.max_requests = max_requests or 1000
+        self.window_seconds = window_seconds or 60
+        self._request_counts: dict[str, list] = {}
+        self._counts_lock = asyncio.Lock()
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         client_ip = request.client.host if request.client else "unknown"
