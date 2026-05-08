@@ -155,12 +155,14 @@ export const SettingsModal = ({
     if (type === 'ocr') {
       const updated = ocrKeys.filter((_, i) => i !== index);
       setOcrKeys(updated);
-      setErrors(prev => prev.filter(e => !e.field.startsWith(`ocr-${index}`)));
+      const newErrors = updated.flatMap((key, i) => validateKeyConfig(key, i, type));
+      setErrors(newErrors);
       if (updated.length === 0) setShowAddForm(false);
     } else {
       const updated = llmKeys.filter((_, i) => i !== index);
       setLlmKeys(updated);
-      setErrors(prev => prev.filter(e => !e.field.startsWith(`llm-${index}`)));
+      const newErrors = updated.flatMap((key, i) => validateKeyConfig(key, i, type));
+      setErrors(newErrors);
       if (updated.length === 0) setShowAddForm(false);
     }
   };
@@ -168,7 +170,7 @@ export const SettingsModal = ({
   const loadKeysToEdit = (pool: KeyPoolStats | undefined, type: 'ocr' | 'llm') => {
     if (pool?.keys) {
       const keys = pool.keys.map(k => ({
-        api_key: k.api_key.replace('...', ''),
+        api_key: '',
         api_base: k.api_base,
         model_name: k.model_name,
         max_concurrent: k.max_concurrent,

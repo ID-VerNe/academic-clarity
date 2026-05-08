@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 
 try:
-    from backend.config import KeyPoolConfig, OCRConfig
+    from backend.constants import KeyPoolConfig, OCRConfig
 except ImportError:
-    from config import KeyPoolConfig, OCRConfig
+    from constants import KeyPoolConfig, OCRConfig
 
 @dataclass
 class KeyState:

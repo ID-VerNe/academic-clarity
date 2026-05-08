@@ -11,9 +11,9 @@ from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown
 from services.config_service import ConfigService
 
 try:
-    from backend.config import OCRConfig, MetadataConfig
+    from backend.constants import OCRConfig, MetadataConfig
 except ImportError:
-    from config import OCRConfig, MetadataConfig
+    from constants import OCRConfig, MetadataConfig
 
 class EmptyFileError(Exception):
     """Raised when the PDF file is 0 bytes or essentially empty."""

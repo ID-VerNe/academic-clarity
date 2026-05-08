@@ -8,9 +8,9 @@ from litellm import completion
 from core.api_key_manager import key_manager, KeyState, ServiceKeyPool
 
 try:
-    from backend.config import APIConfig, OCRConfig
+    from backend.constants import APIConfig, OCRConfig
 except ImportError:
-    from config import APIConfig, OCRConfig
+    from constants import APIConfig, OCRConfig
 
 class APIKeyPoolExhaustedError(Exception):
     """所有 API 密钥都不可用"""

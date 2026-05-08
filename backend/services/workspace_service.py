@@ -1,7 +1,6 @@
 import os
 import asyncio
 from database import Database
-from services.ocr_service import run_full_ocr_workflow
 
 class WorkspaceService:
     def __init__(self, workspace_path, db: Database):
@@ -35,7 +34,7 @@ class WorkspaceService:
         """
         print(f"[Workspace] Async scanning: {self.workspace_path}")
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         physical_files = await loop.run_in_executor(
             None,
@@ -49,9 +48,10 @@ class WorkspaceService:
         for filename in physical_files:
             if filename not in db_filenames:
                 full_path = os.path.join(self.workspace_path, filename)
-                doc_id = await loop.run_in_executor(
+                loop2 = asyncio.get_running_loop()
+                doc_id = await loop2.run_in_executor(
                     None,
-                    lambda: self.db.add_document(filename, full_path, full_path)
+                    lambda fn=filename, fp=full_path: self.db.add_document(fn, fp, fp)
                 )
                 new_tasks.append((doc_id, full_path))
                 print(f"  [Sync] New document indexed: {filename}")

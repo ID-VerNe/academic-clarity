@@ -5,9 +5,9 @@ from contextlib import contextmanager
 from utils.text_processor import parse_structured_ocr_content
 
 try:
-    from backend.config import DBConfig
+    from backend.constants import DBConfig
 except ImportError:
-    from config import DBConfig
+    from constants import DBConfig
 
 class Database:
     _write_lock = threading.Lock()
@@ -30,9 +30,9 @@ class Database:
                 cursor = conn.cursor()
                 yield cursor
                 conn.commit()
-            except Exception as e:
+            except Exception:
                 conn.rollback()
-                raise e
+                raise
             finally:
                 conn.close()
 

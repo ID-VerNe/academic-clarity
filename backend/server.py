@@ -12,9 +12,9 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 try:
-    from backend.config import SecurityConfig, ServerConfig
+    from backend.constants import SecurityConfig, ServerConfig
 except ImportError:
-    from config import SecurityConfig, ServerConfig
+    from constants import SecurityConfig, ServerConfig
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -75,20 +75,16 @@ app.add_middleware(
 
 @app.get("/files/{filename}")
 async def serve_file(filename: str):
-    import posixpath
-
     decoded_filename = urllib.parse.unquote(filename)
 
     if '..' in decoded_filename or decoded_filename.startswith('/') or decoded_filename.startswith('\\'):
         raise HTTPException(status_code=400, detail="Invalid filename: path traversal detected")
 
-    safe_path = posixpath.normpath(decoded_filename)
-    if safe_path.startswith('..'):
-        raise HTTPException(status_code=400, detail="Invalid filename: path traversal detected")
+    if os.path.splitdrive(decoded_filename)[0]:
+        raise HTTPException(status_code=400, detail="Invalid filename: drive letters not allowed")
 
-    file_path = os.path.join(state.workspace_path, safe_path)
     normalized_workspace = os.path.normpath(state.workspace_path)
-    normalized_file_path = os.path.normpath(file_path)
+    normalized_file_path = os.path.normpath(os.path.join(normalized_workspace, decoded_filename))
 
     common = os.path.commonpath([normalized_workspace, normalized_file_path])
     if common != normalized_workspace:
@@ -130,7 +126,7 @@ async def get_task_stats():
 
 @app.post("/workspace/sync")
 async def sync_workspace():
-    state.workspace_service.scan_and_sync()
+    await state.workspace_service.async_scan_and_sync()
     docs = state.db.get_all_documents()
 
     triggered = 0
@@ -262,7 +258,7 @@ async def reprocess_document(doc_id: int):
     doc = state.db.get_document(doc_id)
     if not doc:
         raise HTTPException(status_code=404)
-    await task_hub.add_task(doc_id, run_full_ocr_workflow, doc['stored_path'])
+    await task_hub.add_task(doc_id, run_full_ocr_workflow, doc['stored_path'], force=True)
     return {"success": True}
 
 @app.post("/chat")
