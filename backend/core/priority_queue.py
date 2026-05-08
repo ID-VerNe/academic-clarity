@@ -6,7 +6,7 @@ import asyncio
 import time
 import heapq
 import uuid
-from typing import Dict, Optional, Any, Callable, Tuple
+from typing import Dict, Optional, Callable, Any
 from dataclasses import dataclass, field
 from enum import IntEnum
 from collections import defaultdict
@@ -30,7 +30,6 @@ class TaskPriority(IntEnum):
 
 @dataclass
 class QueuedTask:
-    """队列任务"""
     priority: int
     doc_id: int
     task_func: Callable
@@ -42,7 +41,7 @@ class QueuedTask:
     scheduled_at: Optional[float] = None
     metadata: Dict = field(default_factory=dict)
 
-    def __lt__(self, other):
+    def __lt__(self, other: "QueuedTask") -> bool:
         if self.scheduled_at and other.scheduled_at:
             return (self.scheduled_at, self.priority) < (other.scheduled_at, other.priority)
         elif self.scheduled_at:
@@ -59,16 +58,19 @@ class QueuedTask:
         idx = min(self.retry_count, len(backoff) - 1)
         return backoff[idx]
 
+    def is_ready(self) -> bool:
+        if self.scheduled_at is None:
+            return True
+        return time.time() >= self.scheduled_at
+
+@dataclass
 class DeadLetterEntry:
-    """死信队列条目"""
-    def __init__(self, task: QueuedTask, error: str, failed_at: float):
-        self.task = task
-        self.error = error
-        self.failed_at = failed_at
-        self.failure_count = 1
+    task: QueuedTask
+    error: str
+    failed_at: float
+    failure_count: int = 1
 
 class PriorityTaskQueue:
-    """优先级任务队列"""
     def __init__(self):
         self._heap: list = []
         self._tasks_by_id: Dict[str, QueuedTask] = {}
@@ -79,13 +81,15 @@ class PriorityTaskQueue:
         self._dead_letter_lock = threading.Lock()
 
     async def enqueue(self, task: QueuedTask) -> str:
-        """将任务加入队列"""
         async with self._lock:
-            if task.doc_id in self._tasks_by_doc_id:
-                existing_id = self._tasks_by_doc_id[task.doc_id]
+            existing_id = self._tasks_by_doc_id.get(task.doc_id)
+            if existing_id:
                 existing = self._tasks_by_id.get(existing_id)
-                if existing and existing.priority <= task.priority:
-                    return existing_id
+                if existing:
+                    if task.priority < existing.priority:
+                        await self._remove_task_internal(existing_id)
+                    else:
+                        return existing_id
 
             heapq.heappush(self._heap, task)
             self._tasks_by_id[task.task_id] = task
@@ -97,7 +101,6 @@ class PriorityTaskQueue:
     async def enqueue_priority(self, doc_id: int, task_func: Callable,
                                *args, priority: TaskPriority = TaskPriority.NORMAL,
                                **kwargs) -> str:
-        """快捷方法：按优先级入队"""
         task = QueuedTask(
             priority=priority.value,
             doc_id=doc_id,
@@ -107,28 +110,39 @@ class PriorityTaskQueue:
         )
         return await self.enqueue(task)
 
-    async def dequeue(self) -> Optional[QueuedTask]:
-        """取出最高优先级任务"""
-        async with self._lock:
-            now = time.time()
-            while self._heap:
-                task = heapq.heappop(self._heap)
+    async def _remove_task_internal(self, task_id: str) -> bool:
+        if task_id in self._tasks_by_id:
+            task = self._tasks_by_id.pop(task_id)
+            self._tasks_by_doc_id.pop(task.doc_id, None)
+            return True
+        return False
 
-                if task.scheduled_at and task.scheduled_at > now:
-                    heapq.heappush(self._heap, task)
+    async def dequeue(self, timeout: float = 1.0) -> Optional[QueuedTask]:
+        while True:
+            async with self._lock:
+                if not self._heap:
+                    self._event.clear()
                     return None
 
+                task = self._heap[0]
+
+                if not task.is_ready():
+                    wait_time = task.scheduled_at - time.time()
+                    if wait_time > 0:
+                        pass
+                    return None
+
+                task = heapq.heappop(self._heap)
                 if task.task_id in self._tasks_by_id:
                     del self._tasks_by_id[task.task_id]
                     self._tasks_by_doc_id.pop(task.doc_id, None)
-                    self._event.clear()
+                    if not self._heap:
+                        self._event.clear()
                     return task
 
-            self._event.clear()
-            return None
+            await asyncio.sleep(0.1)
 
     async def requeue_with_delay(self, task: QueuedTask, delay: Optional[float] = None):
-        """延迟重新入队"""
         if delay is None:
             delay = task.get_retry_delay()
 
@@ -141,26 +155,18 @@ class PriorityTaskQueue:
             self._event.set()
 
     async def cancel_task(self, task_id: str) -> bool:
-        """取消任务"""
         async with self._lock:
-            if task_id in self._tasks_by_id:
-                task = self._tasks_by_id.pop(task_id)
-                self._tasks_by_doc_id.pop(task.doc_id, None)
-                return True
-        return False
+            return await self._remove_task_internal(task_id)
 
     async def cancel_by_doc_id(self, doc_id: int) -> bool:
-        """按文档ID取消任务"""
         async with self._lock:
             task_id = self._tasks_by_doc_id.get(doc_id)
             if task_id:
-                self._tasks_by_id.pop(task_id, None)
-                self._tasks_by_doc_id.pop(doc_id, None)
+                await self._remove_task_internal(task_id)
                 return True
         return False
 
     def move_to_dead_letter(self, task: QueuedTask, error: str):
-        """移动到死信队列"""
         with self._dead_letter_lock:
             if task.task_id in self._dead_letters:
                 entry = self._dead_letters[task.task_id]
@@ -171,7 +177,6 @@ class PriorityTaskQueue:
                 self._dead_letters[task.task_id] = DeadLetterEntry(task, error, time.time())
 
     def get_dead_letters(self) -> Dict[str, Dict]:
-        """获取死信队列"""
         with self._dead_letter_lock:
             return {
                 task_id: {
@@ -187,12 +192,10 @@ class PriorityTaskQueue:
             }
 
     def clear_dead_letters(self):
-        """清空死信队列"""
         with self._dead_letter_lock:
             self._dead_letters.clear()
 
     def retry_dead_letter(self, task_id: str) -> Optional[QueuedTask]:
-        """重试死信任务"""
         with self._dead_letter_lock:
             if task_id in self._dead_letters:
                 entry = self._dead_letters.pop(task_id)
@@ -202,16 +205,18 @@ class PriorityTaskQueue:
         return None
 
     async def wait_for_task(self, timeout: Optional[float] = None) -> Optional[QueuedTask]:
-        """等待任务可用"""
         while True:
-            task = await self.dequeue()
+            task = await self.dequeue(timeout=1.0)
             if task:
                 return task
 
-            try:
-                await asyncio.wait_for(self._event.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
-                return None
+            if timeout:
+                try:
+                    await asyncio.wait_for(self._event.wait(), timeout=min(timeout, 1.0))
+                except asyncio.TimeoutError:
+                    return None
+            else:
+                await self._event.wait()
 
     def size(self) -> int:
         return len(self._tasks_by_id)
@@ -224,19 +229,29 @@ class PriorityTaskQueue:
 
     def get_stats(self) -> Dict:
         priority_counts = defaultdict(int)
+        now = time.time()
+        ready_count = 0
+        delayed_count = 0
+
         for task in self._tasks_by_id.values():
             priority_counts[task.priority] += 1
+            if task.scheduled_at:
+                if task.scheduled_at <= now:
+                    ready_count += 1
+                else:
+                    delayed_count += 1
+            else:
+                ready_count += 1
 
         return {
             "total_tasks": len(self._tasks_by_id),
+            "ready_tasks": ready_count,
+            "delayed_tasks": delayed_count,
             "priority_distribution": dict(priority_counts),
-            "dead_letters": len(self._dead_letters),
-            "scheduled_tasks": sum(1 for t in self._tasks_by_id.values() if t.scheduled_at)
+            "dead_letters": len(self._dead_letters)
         }
 
-
 class PriorityTaskManager:
-    """优先级任务管理器"""
     def __init__(self, concurrency: Optional[int] = None):
         if concurrency is None:
             concurrency = TaskConfig.DEFAULT_CONCURRENCY
@@ -250,7 +265,6 @@ class PriorityTaskManager:
         self._worker_stats: Dict[int, Dict] = defaultdict(lambda: {"tasks": 0, "errors": 0})
 
     async def start(self, app_state):
-        """启动任务管理器"""
         self._app_state = app_state
         self._running = True
 
@@ -261,7 +275,6 @@ class PriorityTaskManager:
         print(f"[PriorityTaskHub] Started {self.concurrency} workers")
 
     async def stop(self):
-        """停止任务管理器"""
         self._running = False
         for worker in self.workers:
             worker.cancel()
@@ -271,7 +284,6 @@ class PriorityTaskManager:
     async def add_task(self, doc_id: int, task_func: Callable, *args,
                       priority: TaskPriority = TaskPriority.NORMAL,
                       force: bool = False, **kwargs) -> Optional[str]:
-        """添加任务"""
         if not force and doc_id in self._active_task_ids:
             print(f"[PriorityTaskHub] Doc {doc_id} already processing, skipping")
             return None
@@ -291,7 +303,6 @@ class PriorityTaskManager:
         return await self.queue.enqueue(task)
 
     async def _worker_loop(self, worker_id: int):
-        """Worker循环"""
         while self._running:
             task = await self.queue.wait_for_task(timeout=1.0)
 
@@ -317,7 +328,8 @@ class PriorityTaskManager:
                     print(f"[Worker-{worker_id}] Max retries reached for Doc {task.doc_id}: {error_msg}")
                     self.queue.move_to_dead_letter(task, error_msg)
             finally:
-                self._active_task_ids.pop(task.doc_id, None)
+                if self._active_task_ids.get(task.doc_id) == task.task_id:
+                    self._active_task_ids.pop(task.doc_id, None)
 
     def get_stats(self) -> Dict:
         return {

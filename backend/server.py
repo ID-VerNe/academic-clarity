@@ -28,7 +28,8 @@ from services.config_service import ConfigService
 from services.workspace_service import WorkspaceService
 from core.task_manager import task_hub
 from utils.logger import core_logger, api_logger, task_logger, db_logger, key_logger, get_logger
-from utils.metrics import metrics, MetricsMiddleware
+from utils.metrics import metrics
+from utils.middleware import PrometheusMetricsMiddleware, RequestLoggingMiddleware
 from utils.health import health_checker
 from utils.cache import init_cache, get_cache
 from utils.websocket import ws_manager, progress_tracker, EventType
@@ -88,7 +89,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Academic Clarity Backend", lifespan=lifespan)
 
-app.middleware("http")(MetricsMiddleware(lambda scope, receive, send: None))
+app.add_middleware(PrometheusMetricsMiddleware, metrics_collector=metrics)
+app.add_middleware(RequestLoggingMiddleware, logger=api_logger)
 
 app.add_middleware(
     CORSMiddleware,

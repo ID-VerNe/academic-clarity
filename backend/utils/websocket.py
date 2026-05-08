@@ -8,7 +8,6 @@ import time
 from typing import Dict, Set, Optional, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime
 import threading
 
 class EventType(str, Enum):
@@ -28,7 +27,7 @@ class EventType(str, Enum):
 class WSMessage:
     event: EventType
     data: Dict[str, Any]
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    timestamp: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%S") + "Z")
     message_id: str = ""
 
     def to_json(self) -> str:
@@ -81,42 +80,39 @@ class ConnectionManager:
         self._message_id_lock = threading.Lock()
 
     async def connect(self, websocket, channels: Optional[list] = None):
-        """接受新的WebSocket连接"""
         async with self._connection_lock:
             self._connections.add(websocket)
 
-        channels = channels or ["all"]
-        for channel in channels:
-            if channel in self._subscribers:
-                self._subscribers[channel].add(websocket)
-            self._subscribers["all"].add(websocket)
+        self._subscribers["all"].add(websocket)
 
-        await self.broadcast(EventType.SYSTEM_STATUS, {
+        if channels:
+            for channel in channels:
+                if channel != "all" and channel in self._subscribers:
+                    self._subscribers[channel].add(websocket)
+
+        await self.broadcast_safe(EventType.SYSTEM_STATUS, {
             "connected": True,
             "total_connections": len(self._connections)
         }, channels=["all"])
 
     async def disconnect(self, websocket):
-        """断开WebSocket连接"""
         async with self._connection_lock:
             self._connections.discard(websocket)
 
         for channel_subscribers in self._subscribers.values():
             channel_subscribers.discard(websocket)
 
-        await self.broadcast(EventType.SYSTEM_STATUS, {
+        await self.broadcast_safe(EventType.SYSTEM_STATUS, {
             "connected": False,
             "total_connections": len(self._connections)
         }, channels=["all"])
 
     def _generate_message_id(self) -> str:
-        """生成唯一消息ID"""
         with self._message_id_lock:
             self._message_id_counter += 1
             return f"msg_{self._message_id_counter}_{int(time.time() * 1000)}"
 
     async def send(self, websocket, event: EventType, data: Dict[str, Any]):
-        """向单个连接发送消息"""
         try:
             message = WSMessage(
                 event=event,
@@ -124,9 +120,16 @@ class ConnectionManager:
                 message_id=self._generate_message_id()
             )
             await websocket.send_text(message.to_json())
-        except Exception as e:
-            print(f"[WS] Send error: {e}")
+        except Exception:
             await self.disconnect(websocket)
+
+    async def broadcast_safe(self, event: EventType, data: Dict[str, Any],
+                           channels: Optional[list] = None, exclude: Optional[Set] = None):
+        """安全的广播 - 捕获所有异常"""
+        try:
+            await self.broadcast(event, data, channels, exclude)
+        except Exception:
+            pass
 
     async def broadcast(self, event: EventType, data: Dict[str, Any],
                        channels: Optional[list] = None, exclude: Optional[Set] = None):
@@ -156,11 +159,11 @@ class ConnectionManager:
                 disconnected.add(websocket)
 
         for ws in disconnected:
-            await self.disconnect(ws)
+            if ws in self._connections:
+                await self.disconnect(ws)
 
     async def send_task_update(self, doc_id: int, status: str, progress: float = 0,
                               message: str = "", metadata: Optional[Dict] = None):
-        """发送任务更新"""
         event_map = {
             "pending": EventType.TASK_STARTED,
             "processing": EventType.TASK_PROGRESS,
@@ -180,7 +183,6 @@ class ConnectionManager:
 
     async def send_document_update(self, action: str, doc_id: int,
                                    document: Optional[Dict] = None):
-        """发送文档更新"""
         event_map = {
             "added": EventType.DOC_ADDED,
             "updated": EventType.DOC_UPDATED,
@@ -196,7 +198,6 @@ class ConnectionManager:
 
     async def send_ocr_status_change(self, doc_id: int, old_status: str,
                                      new_status: str, **kwargs):
-        """发送OCR状态变更"""
         await self.broadcast(EventType.OCR_STATUS_CHANGE, {
             "doc_id": doc_id,
             "old_status": old_status,
@@ -205,18 +206,15 @@ class ConnectionManager:
         }, channels=["task", "document"])
 
     async def send_key_pool_update(self, service: str, stats: Dict):
-        """发送密钥池更新"""
         await self.broadcast(EventType.KEY_POOL_UPDATE, {
             "service": service,
             "stats": stats
         }, channels=["system"])
 
     def get_connection_count(self) -> int:
-        """获取当前连接数"""
         return len(self._connections)
 
     def get_channel_subscribers(self, channel: str) -> int:
-        """获取频道订阅者数量"""
         if channel in self._subscribers:
             return len(self._subscribers[channel])
         return 0
@@ -224,7 +222,7 @@ class ConnectionManager:
 ws_manager = ConnectionManager()
 
 class WebSocketProgressTracker:
-    """任务进度追踪器 - 与WebSocket集成"""
+    """任务进度追踪器"""
     _instance = None
     _lock = threading.Lock()
 
@@ -243,7 +241,6 @@ class WebSocketProgressTracker:
         self._active_tasks: Dict[int, Dict] = {}
 
     async def track_task_start(self, doc_id: int, task_type: str = "ocr"):
-        """开始追踪任务"""
         self._active_tasks[doc_id] = {
             "type": task_type,
             "start_time": time.time(),
@@ -255,7 +252,6 @@ class WebSocketProgressTracker:
 
     async def track_task_progress(self, doc_id: int, progress: float,
                                    step: Optional[str] = None):
-        """追踪任务进度"""
         if doc_id not in self._active_tasks:
             await self.track_task_start(doc_id)
 
@@ -271,7 +267,6 @@ class WebSocketProgressTracker:
         await ws_manager.send_task_update(doc_id, "processing", progress, step)
 
     async def track_task_complete(self, doc_id: int, result: Optional[Dict] = None):
-        """追踪任务完成"""
         if doc_id in self._active_tasks:
             task = self._active_tasks[doc_id]
             duration = time.time() - task["start_time"]
@@ -281,7 +276,6 @@ class WebSocketProgressTracker:
         await ws_manager.send_task_update(doc_id, "completed", 100, "Task completed", result)
 
     async def track_task_failure(self, doc_id: int, error: str):
-        """追踪任务失败"""
         if doc_id in self._active_tasks:
             task = self._active_tasks[doc_id]
             duration = time.time() - task["start_time"]
@@ -292,7 +286,6 @@ class WebSocketProgressTracker:
         await ws_manager.send_task_update(doc_id, "failed", 0, error)
 
     def get_active_tasks(self) -> Dict[int, Dict]:
-        """获取当前活动任务"""
         return dict(self._active_tasks)
 
 progress_tracker = WebSocketProgressTracker()

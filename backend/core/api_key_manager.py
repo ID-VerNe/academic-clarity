@@ -140,33 +140,52 @@ class ServiceKeyPool:
         start_time = time.time()
 
         while True:
-            if time.time() - start_time > KeyPoolConfig.ACQUIRE_TIMEOUT:
-                print(f"[KeyPool:{self.service_name}] Timeout acquiring key after {KeyPoolConfig.ACQUIRE_TIMEOUT}s")
+            elapsed = time.time() - start_time
+            if elapsed > KeyPoolConfig.ACQUIRE_TIMEOUT:
+                print(f"[KeyPool:{self.service_name}] Timeout acquiring key after {elapsed:.1f}s")
                 return None
 
-            candidates = []
+            reserved_key = None
+
             async with self._async_lock:
                 checked_keys = 0
+                candidates = []
+
                 while checked_keys < len(self._key_order):
                     api_key = self._key_order[self._current_index]
                     state = self._keys.get(api_key)
                     if state and self._is_key_healthy_sync(state):
-                        candidates.append(state)
+                        candidates.append((api_key, state))
                     self._current_index = (self._current_index + 1) % len(self._key_order)
                     checked_keys += 1
 
-            for state in candidates:
-                async with state.lock:
-                    if state.active_requests >= state.max_concurrent:
-                        continue
-                    if not await self._check_rate_limits_internal(state):
-                        continue
-                    state.active_requests += 1
-                    state.last_used = time.time()
-                    self._request_times[state.key].append(time.time())
-                    return state
+                for api_key, state in candidates:
+                    if state.active_requests < state.max_concurrent:
+                        current_time = time.time()
+                        recent_requests = [
+                            t for t in self._request_times[api_key]
+                            if current_time - t < 60
+                        ]
+                        if len(recent_requests) >= state.rpm_limit:
+                            continue
 
-            sleep_time = min(KeyPoolConfig.RETRY_INTERVAL, KeyPoolConfig.ACQUIRE_TIMEOUT - (time.time() - start_time))
+                        recent_tokens = [
+                            (t, c) for t, c in self._token_counts[api_key]
+                            if current_time - t < 60
+                        ]
+                        if sum(c for _, c in recent_tokens) >= state.tpm_limit:
+                            continue
+
+                        state.active_requests += 1
+                        state.last_used = current_time
+                        self._request_times[api_key].append(current_time)
+                        reserved_key = state
+                        break
+
+            if reserved_key:
+                return reserved_key
+
+            sleep_time = min(KeyPoolConfig.RETRY_INTERVAL, KeyPoolConfig.ACQUIRE_TIMEOUT - elapsed)
             if sleep_time > 0:
                 await asyncio.sleep(sleep_time)
 

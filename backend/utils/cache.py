@@ -10,13 +10,21 @@ from enum import Enum
 import threading
 
 try:
-    from backend.constants import CacheConfig
+    from backend.constants import CacheConfig as BackendCacheConfig
 except ImportError:
-    class CacheConfig:
-        DEFAULT_TTL = 300
-        DOCUMENT_TTL = 600
-        KEYPOOL_TTL = 30
-        ENABLED = False
+    BackendCacheConfig = None
+
+try:
+    from constants import CacheConfig as LocalCacheConfig
+except ImportError:
+    LocalCacheConfig = None
+
+class CacheConfig:
+    DEFAULT_TTL = getattr(BackendCacheConfig, 'DEFAULT_TTL', 300) if BackendCacheConfig else 300
+    DOCUMENT_TTL = getattr(BackendCacheConfig, 'DOCUMENT_TTL', 600) if BackendCacheConfig else 600
+    KEYPOOL_TTL = getattr(BackendCacheConfig, 'KEYPOOL_TTL', 30) if BackendCacheConfig else 30
+    ENABLED = getattr(BackendCacheConfig, 'ENABLED', False) if BackendCacheConfig else False
+    MAX_IN_MEMORY_SIZE = 1000
 
 class CacheStrategy(str, Enum):
     LRU = "lru"
@@ -25,7 +33,6 @@ class CacheStrategy(str, Enum):
 
 @dataclass
 class CacheEntry:
-    """缓存条目"""
     key: str
     value: Any
     created_at: float
@@ -47,7 +54,7 @@ class InMemoryCache:
     _instance = None
     _lock = threading.Lock()
 
-    def __new__(cls):
+    def __new__(cls, max_size: int = 1000):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -94,10 +101,8 @@ class InMemoryCache:
         self._cache.clear()
 
     def _evict(self):
-        """淘汰策略"""
         if not self._cache:
             return
-
         oldest_key = min(self._cache.items(), key=lambda x: x[1].accessed_at)[0]
         del self._cache[oldest_key]
 
@@ -133,7 +138,7 @@ class RedisCache:
                  key_prefix: str = "ac:"):
         self._key_prefix = key_prefix
         self._redis = None
-        self._fallback = InMemoryCache()
+        self._fallback = InMemoryCache(CacheConfig.MAX_IN_MEMORY_SIZE)
         self._connected = False
 
         try:
@@ -241,7 +246,7 @@ class CacheManager:
     _instance = None
     _lock = threading.Lock()
 
-    def __new__(cls):
+    def __new__(cls, redis_host: Optional[str] = None, redis_port: int = 6379):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -257,7 +262,7 @@ class CacheManager:
         if redis_host:
             self.cache = RedisCache(host=redis_host, port=redis_port)
         else:
-            self.cache = InMemoryCache()
+            self.cache = InMemoryCache(CacheConfig.MAX_IN_MEMORY_SIZE)
 
         self._document_cache = DocumentCache(self.cache)
         self._metadata_cache = MetadataCache(self.cache)
@@ -334,17 +339,17 @@ class KeyPoolCache:
         self.cache.delete(f"keypool:{service}:stats")
 
 
-cache_manager = None
+_cache_manager: Optional[CacheManager] = None
 
-def init_cache(redis_host: Optional[str] = None, redis_port: int = 6379):
+def init_cache(redis_host: Optional[str] = None, redis_port: int = 6379) -> CacheManager:
     """初始化缓存管理器"""
-    global cache_manager
-    cache_manager = CacheManager(redis_host, redis_port)
-    return cache_manager
+    global _cache_manager
+    _cache_manager = CacheManager(redis_host, redis_port)
+    return _cache_manager
 
 def get_cache() -> CacheManager:
     """获取缓存管理器"""
-    global cache_manager
-    if cache_manager is None:
-        cache_manager = CacheManager()
-    return cache_manager
+    global _cache_manager
+    if _cache_manager is None:
+        _cache_manager = CacheManager()
+    return _cache_manager
