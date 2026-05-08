@@ -2,32 +2,38 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
+import { api } from '../../api/client';
 
 // Setup PDF.js Worker from CDN or local (CDN is more reliable for Electron dev)
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface PdfViewerProps {
-  url: string;
+  filename: string;
 }
 
-export const PdfViewer = ({ url }: PdfViewerProps) => {
+export const PdfViewer = ({ filename }: PdfViewerProps) => {
   const [numPages, setNumPages] = useState<number>(0);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const blobUrlRef = useRef<string | null>(null);
 
   // Use Object URL for maximum stability with react-pdf
   useEffect(() => {
-    if (!url) return;
+    if (!filename) return;
     
     const loadPdf = async () => {
       try {
         setLoadError(null);
-        const response = await fetch(url);
+        const resolvedUrl = await api.getPdfUrl(filename);
+        const response = await fetch(resolvedUrl);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const blob = await response.blob();
         const localUrl = URL.createObjectURL(blob);
+        if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = localUrl;
         setBlobUrl(localUrl);
       } catch (e: any) {
         setLoadError(e.message);
@@ -37,9 +43,12 @@ export const PdfViewer = ({ url }: PdfViewerProps) => {
 
     loadPdf();
     return () => {
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
     };
-  }, [url]);
+  }, [filename, retryTick]);
 
   // Auto-Scale Logic
   useEffect(() => {
@@ -63,7 +72,7 @@ export const PdfViewer = ({ url }: PdfViewerProps) => {
       <div className="flex flex-col items-center justify-center h-full gap-4 text-rose-500 p-10 text-center">
         <p className="font-bold">Failed to load PDF content.</p>
         <p className="text-xs opacity-70">{loadError}</p>
-        <button onClick={() => window.location.reload()} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Retry Page</button>
+        <button onClick={() => setRetryTick((v) => v + 1)} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Retry PDF</button>
       </div>
     );
   }

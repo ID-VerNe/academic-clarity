@@ -13,7 +13,7 @@ if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
     sys.path.insert(0, BACKEND_PATH)
 
 # Updated import path after refactoring
-from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown
+from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown, parse_structured_ocr_content
 
 class TestTextProcessing(unittest.TestCase):
     def test_clean_ocr_markdown_removes_tags(self):
@@ -37,6 +37,57 @@ class TestTextProcessing(unittest.TestCase):
         md = "No H1 Header\nJust Text"
         title = extract_title_from_markdown(md)
         self.assertEqual(title, "No H1 Header")
+
+    def test_parse_structured_ocr_content_parses_tagged_blocks(self):
+        raw = "\n".join([
+            "title",
+            "A Review of P2P Energy Trading",
+            "text Shama Naz Islam",
+            "text Abstract: This paper reviews methods.",
+            "sub_title",
+            "1. Introduction",
+            "text Distributed resources are growing."
+        ])
+        structured = parse_structured_ocr_content(raw)
+        self.assertEqual(
+            structured,
+            {
+                "version": 1,
+                "blocks": [
+                    {"type": "title", "text": "A Review of P2P Energy Trading"},
+                    {"type": "text", "text": "Shama Naz Islam\nAbstract: This paper reviews methods."},
+                    {"type": "subtitle", "text": "1. Introduction"},
+                    {"type": "text", "text": "Distributed resources are growing."}
+                ]
+            }
+        )
+
+    def test_parse_structured_ocr_content_ignores_plain_markdown(self):
+        raw = "# Markdown Title\n\nThis is plain markdown."
+        structured = parse_structured_ocr_content(raw)
+        self.assertEqual(structured, {"version": 1, "blocks": []})
+
+    def test_parse_structured_ocr_content_handles_inline_tokens_and_heading_prefix(self):
+        raw = "\n".join([
+            "title",
+            "# Smooth Q-Learning  text",
+            "Author A · Author B  sub_title",
+            "## Abstract  text",
+            "Paragraph line."
+        ])
+        structured = parse_structured_ocr_content(raw)
+        self.assertEqual(
+            structured,
+            {
+                "version": 1,
+                "blocks": [
+                    {"type": "title", "text": "Smooth Q-Learning"},
+                    {"type": "text", "text": "Author A · Author B"},
+                    {"type": "subtitle", "text": "Abstract"},
+                    {"type": "text", "text": "Paragraph line."}
+                ]
+            }
+        )
 
 if __name__ == "__main__":
     unittest.main()

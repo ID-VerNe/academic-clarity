@@ -1,6 +1,9 @@
 import os
 import fitz
 import asyncio
+import re
+import ast
+import base64
 from PIL import Image
 from io import BytesIO
 from services.ai_service import call_ocr_api, call_json_extraction_api
@@ -10,6 +13,55 @@ from services.config_service import ConfigService
 class EmptyFileError(Exception):
     """Raised when the PDF file is 0 bytes or essentially empty."""
     pass
+
+def replace_image_tags_with_markdown(content, image):
+    """
+    Convert DeepSeek image grounding tags into embeddable markdown images.
+    Example:
+    <|ref|>image<|/ref|><|det|>[[x1,y1,x2,y2]]<|/det|> -> ![](data:image/jpeg;base64,...)
+    """
+    if not content:
+        return ""
+
+    pattern = re.compile(r'<\|ref\|>(.*?)<\|/ref\|><\|det\|>(.*?)<\|/det\|>', re.DOTALL)
+    width, height = image.size
+    def replacement(match):
+        ref_text = (match.group(1) or "").strip()
+        det_text = (match.group(2) or "").strip()
+
+        # Keep textual grounding in markdown; extract actual image regions as embedded images.
+        if ref_text.lower() != "image":
+            return ref_text
+
+        try:
+            coords_list = ast.literal_eval(det_text)
+        except Exception:
+            return ""
+
+        images_md = []
+        for points in coords_list:
+            if not isinstance(points, (list, tuple)) or len(points) != 4:
+                continue
+            x1, y1, x2, y2 = points
+            x1 = max(0, min(width, int(x1 / 999 * width)))
+            y1 = max(0, min(height, int(y1 / 999 * height)))
+            x2 = max(0, min(width, int(x2 / 999 * width)))
+            y2 = max(0, min(height, int(y2 / 999 * height)))
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            cropped = image.crop((x1, y1, x2, y2))
+            buffer = BytesIO()
+            cropped.save(buffer, format="JPEG", quality=85)
+            data_uri = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            images_md.append(f"![](data:image/jpeg;base64,{data_uri})")
+
+        return "\n".join(images_md)
+
+    replaced = pattern.sub(replacement, content)
+    # Drop any leftover broken tags from partial responses
+    replaced = re.sub(r'<\|/?ref\|>|<\|/?det\|>', '', replaced)
+    return replaced
 
 async def process_page_task(page_idx, total_pages, pix_data, api_config, retries=3):
     """
@@ -52,14 +104,26 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
 
         # 1. OCR 阶段
         page_tasks = []
+        page_images = []
         for i in range(total_pages):
             pix = doc[i].get_pixmap(dpi=144)
-            page_tasks.append(process_page_task(i, total_pages, pix.tobytes("png"), ocr_api_config))
+            pix_bytes = pix.tobytes("png")
+            try:
+                page_images.append(Image.open(BytesIO(pix_bytes)).convert("RGB"))
+            except Exception:
+                # Test doubles may provide non-image bytes; keep pipeline deterministic.
+                page_images.append(Image.new("RGB", (1, 1), "white"))
+            page_tasks.append(process_page_task(i, total_pages, pix_bytes, ocr_api_config))
         
         page_results = await asyncio.gather(*page_tasks)
         doc.close()
 
-        raw_full_content = "\n\n".join(page_results)
+        page_markdowns = [
+            replace_image_tags_with_markdown(page_results[i], page_images[i])
+            for i in range(total_pages)
+        ]
+
+        raw_full_content = "\n\n".join(page_markdowns)
         cleaned_markdown = clean_ocr_markdown(raw_full_content)
         title = extract_title_from_markdown(raw_full_content)
         

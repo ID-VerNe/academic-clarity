@@ -39,3 +39,18 @@ logs/
 # Environment
 .env
 .env.local
+
+# DeepSeek-OCR (Large Third-party Tool)
+DeepSeek-OCR/
+backend/vendor/deepseek_ocr/
+
+# Output Results
+output_results/
+tests/ocr_lab/output/
+
+# Test Images
+*.jpg
+*.pdf
+
+# Build artifacts
+academic-clarity-source.zip

@@ -31,6 +31,79 @@ def clean_ocr_markdown(md_text):
 
     return cleaned
 
+def parse_structured_ocr_content(md_text):
+    """
+    Parse tagged OCR text into structured JSON blocks.
+    Supported tags: title, text, sub_title/subtitle.
+    """
+    empty_result = {"version": 1, "blocks": []}
+    if not md_text:
+        return empty_result
+
+    normalized = md_text.replace("\r\n", "\n")
+    # DeepSeek sometimes appends tokens in-line with double spaces (e.g. "...  text")
+    normalized = re.sub(r'(?i)[ \t]{2,}(sub_title|subtitle|title|text)(?=[ \t\n]|$)', r'\n\1', normalized)
+    normalized = re.sub(r'(?i)(sub_title|subtitle|title|text)[ \t]{2,}', r'\1\n', normalized)
+
+    blocks = []
+    pending_tag = None
+    saw_tag = False
+
+    def normalize_block_type(tag):
+        lowered = tag.strip().lower()
+        if lowered == "title":
+            return "title"
+        if lowered in ("sub_title", "subtitle"):
+            return "subtitle"
+        return "text"
+
+    def append_block(block_type, value):
+        text = value.strip()
+        if not text:
+            return
+        normalized_type = normalize_block_type(block_type)
+        if normalized_type in ("title", "subtitle"):
+            text = re.sub(r'^#{1,6}\s*', '', text).strip()
+            if not text:
+                return
+        if normalized_type == "text" and blocks and blocks[-1]["type"] == "text":
+            blocks[-1]["text"] = f"{blocks[-1]['text']}\n{text}"
+            return
+        blocks.append({"type": normalized_type, "text": text})
+
+    for raw_line in normalized.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        lowered = line.lower()
+        if lowered in ("title", "text", "sub_title", "subtitle"):
+            saw_tag = True
+            pending_tag = lowered
+            continue
+
+        inline_match = re.match(
+            r'^(title|text|sub_title|subtitle)\s*[:：-]?\s*(.+)$',
+            line,
+            flags=re.IGNORECASE
+        )
+        if inline_match:
+            saw_tag = True
+            append_block(inline_match.group(1), inline_match.group(2))
+            pending_tag = None
+            continue
+
+        if pending_tag:
+            append_block(pending_tag, line)
+            pending_tag = None
+            continue
+
+        append_block("text", line)
+
+    if not saw_tag:
+        return empty_result
+    return {"version": 1, "blocks": blocks}
+
 def extract_title_from_markdown(md_text):
     """
     从 Markdown 中提取最可能的标题。

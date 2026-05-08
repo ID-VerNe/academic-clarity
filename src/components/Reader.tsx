@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { 
   ChevronRight, 
   FileText, 
@@ -27,7 +27,6 @@ interface ReaderProps {
 }
 
 export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
-  const [pdfUrl, setPdfUrl] = useState<string>('');
   const [viewMode, setViewMode] = useState<'split' | 'pdf' | 'markdown'>('split');
   const [chatQuery, setChatQuery] = useState('');
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string}[]>([]);
@@ -46,18 +45,6 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
   // Resizable Logic: Mid Split
   const [splitRatio, setSplitRatio] = useState(50); // percentage for PDF
   const isResizingSplit = useRef(false);
-
-  useEffect(() => {
-    const fetchPdfUrl = async () => {
-      try {
-        const url = await api.getPdfUrl(doc.filename);
-        setPdfUrl(url);
-      } catch (e) {
-        console.error('Failed to get PDF URL:', e);
-      }
-    };
-    fetchPdfUrl();
-  }, [doc.id, doc.filename]);
 
   const onMouseMove = useCallback((e: MouseEvent) => {
     if (isResizingLeft.current) {
@@ -178,7 +165,7 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
               style={{ width: viewMode === 'split' ? `${splitRatio}%` : '100%' }}
               className="h-full bg-slate-300 relative"
             >
-              <PdfViewer url={pdfUrl} />
+              <PdfViewer filename={doc.filename} />
             </div>
           )}
 
@@ -198,6 +185,7 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
             >
               <MarkdownViewer 
                 content={doc.ocr_markdown} 
+                structuredContent={doc.ocr_structured_json}
                 tableStyle={tableStyle} 
                 isSplitView={viewMode === 'split'} 
               />

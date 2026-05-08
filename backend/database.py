@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from utils.text_processor import parse_structured_ocr_content
 
 class Database:
     def __init__(self, db_path):
@@ -135,7 +136,11 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM documents WHERE id = ?', (doc_id,))
             row = cursor.fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            doc = dict(row)
+            doc["ocr_structured_json"] = parse_structured_ocr_content(doc.get("ocr_markdown"))
+            return doc
 
     def get_all_documents(self):
         with self.get_connection() as conn:
@@ -154,4 +159,7 @@ class Database:
                 ) m ON d.id = m.doc_id
                 ORDER BY d.added_at DESC
             ''')
-            return [dict(row) for row in cursor.fetchall()]
+            documents = [dict(row) for row in cursor.fetchall()]
+            for doc in documents:
+                doc["ocr_structured_json"] = parse_structured_ocr_content(doc.get("ocr_markdown"))
+            return documents
