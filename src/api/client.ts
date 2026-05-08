@@ -26,6 +26,24 @@ class ApiClient {
     await fetch(`${baseUrl}/configs?key=${key}&value=${encodeURIComponent(value)}`, { method: 'POST' });
   }
 
+  async getMultiKeyStats() {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/configs/multi-keys`);
+    return res.json();
+  }
+
+  async updateOcrKeys(keysJson: string) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/configs/multi-keys/ocr?ocr_keys=${encodeURIComponent(keysJson)}`, { method: 'POST' });
+    return res.json();
+  }
+
+  async updateLlmKeys(keysJson: string) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/configs/multi-keys/llm?llm_keys=${encodeURIComponent(keysJson)}`, { method: 'POST' });
+    return res.json();
+  }
+
   async getDocuments() {
     const baseUrl = await this.getBaseUrl();
     const res = await fetch(`${baseUrl}/documents`);

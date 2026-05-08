@@ -30,4 +30,41 @@ export interface AppConfig {
   API_BASE: string;
   WORKSPACE_PATH: string;
   TABLE_STYLE: string;
+  USE_MULTI_KEY: boolean;
+  OCR_MULTI_KEY: boolean;
+  LLM_MULTI_KEY: boolean;
+}
+
+export interface KeyConfig {
+  api_key: string;
+  api_base?: string;
+  model_name?: string;
+  max_concurrent?: number;
+  rpm_limit?: number;
+  tpm_limit?: number;
+  enabled?: boolean;
+}
+
+export interface KeyStats {
+  api_key: string;
+  api_base: string;
+  model_name: string;
+  active_requests: number;
+  max_concurrent: number;
+  rpm_limit: number;
+  rpm_used: number;
+  tpm_limit: number;
+  tpm_used: number;
+  is_healthy: boolean;
+  consecutive_errors: number;
+}
+
+export interface KeyPoolStats {
+  enabled: boolean;
+  keys: KeyStats[];
+}
+
+export interface MultiKeyStats {
+  ocr: KeyPoolStats;
+  llm: KeyPoolStats;
 }
