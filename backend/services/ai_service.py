@@ -44,12 +44,14 @@ async def _call_with_key_pool(
     fallback_config: dict,
     api_call_func: Callable,
     error_context: str = "API call"
-) -> Any:
+) -> tuple:
     """
     使用密钥池调用 API，带完善的错误处理
+    返回 (result, tokens_used) 元组
     """
     if pool and pool.is_enabled():
         last_error = None
+        tokens_used = 0
 
         for attempt in range(APIConfig.MAX_RETRIES):
             key_state = await pool.acquire_key()
@@ -61,13 +63,16 @@ async def _call_with_key_pool(
             try:
                 result = await api_call_func(key_state)
 
+                if isinstance(result, tuple):
+                    result, tokens_used = result
+
                 if isinstance(result, str) and result.startswith("Failed:"):
                     last_error = result
                     await pool.report_error(key_state, result)
                     continue
 
-                await pool.report_success(key_state)
-                return result
+                await pool.report_success(key_state, tokens_used)
+                return (result, tokens_used)
 
             except Exception as e:
                 last_error = str(e)
@@ -78,7 +83,10 @@ async def _call_with_key_pool(
 
         raise APIKeyPoolExhaustedError(error_context, last_error)
 
-    return await api_call_func(None)
+    result = await api_call_func(None)
+    if isinstance(result, tuple):
+        return result
+    return (result, 0)
 
 async def call_ocr_api(image, api_config):
     prompt = "<image>\n<|grounding|>Convert the document to markdown."
@@ -94,31 +102,25 @@ async def call_ocr_api(image, api_config):
             if not key_state.model_name:
                 raise APIResponseError("OCR Failed: OCR_MODEL not configured in multi-key settings")
 
-            try:
-                response = await asyncio.to_thread(
-                    completion,
-                    model=key_state.model_name,
-                    messages=[{"role": "user", "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}},
-                        {"type": "text", "text": prompt}
-                    ]}],
-                    api_key=key_state.key,
-                    api_base=key_state.api_base,
-                    temperature=0,
-                    max_tokens=4000,
-                    timeout=APIConfig.REQUEST_TIMEOUT
-                )
-                tokens_used = _extract_tokens_from_response(response)
-                await ocr_pool.report_success(key_state, tokens_used)
-                return response.choices[0].message.content
-            except asyncio.TimeoutError:
-                await ocr_pool.report_error(key_state, "OCR timeout")
-                raise APIResponseError(f"OCR timeout after {APIConfig.REQUEST_TIMEOUT}s")
-            except Exception as e:
-                await ocr_pool.report_error(key_state, str(e))
-                raise APIResponseError(f"OCR Failed: {str(e)}")
+            response = await asyncio.to_thread(
+                completion,
+                model=key_state.model_name,
+                messages=[{"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}},
+                    {"type": "text", "text": prompt}
+                ]}],
+                api_key=key_state.key,
+                api_base=key_state.api_base,
+                temperature=0,
+                max_tokens=4000,
+                timeout=APIConfig.REQUEST_TIMEOUT
+            )
+            tokens_used = _extract_tokens_from_response(response)
+            return (response.choices[0].message.content, tokens_used)
 
-        result = await _call_with_key_pool(ocr_pool, api_config, do_call, "OCR")
+        result, tokens = await _call_with_key_pool(ocr_pool, api_config, do_call, "OCR")
+        if isinstance(result, str) and result.startswith("Failed:"):
+            return result
         return result
     else:
         model_name = api_config.get('model_name', '')
@@ -158,29 +160,21 @@ async def call_chat_api(query, context, api_config):
             if not key_state.model_name:
                 raise APIResponseError("Chat Error: LLM_MODEL not configured in multi-key settings")
 
-            try:
-                response = await asyncio.to_thread(
-                    completion,
-                    model=key_state.model_name,
-                    messages=[
-                        {"role": "system", "content": "You are a specialized academic assistant. Answer based ONLY on the provided context."},
-                        {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUERY:\n{query}"}
-                    ],
-                    api_key=key_state.key,
-                    api_base=key_state.api_base,
-                    temperature=APIConfig.DEFAULT_TEMPERATURE,
-                    timeout=APIConfig.REQUEST_TIMEOUT
-                )
-                await llm_pool.report_success(key_state)
-                return response.choices[0].message.content
-            except asyncio.TimeoutError:
-                await llm_pool.report_error(key_state, "Chat timeout")
-                raise APIResponseError(f"Chat timeout after {APIConfig.REQUEST_TIMEOUT}s")
-            except Exception as e:
-                await llm_pool.report_error(key_state, str(e))
-                raise APIResponseError(f"Chat Error: {str(e)}")
+            response = await asyncio.to_thread(
+                completion,
+                model=key_state.model_name,
+                messages=[
+                    {"role": "system", "content": "You are a specialized academic assistant. Answer based ONLY on the provided context."},
+                    {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUERY:\n{query}"}
+                ],
+                api_key=key_state.key,
+                api_base=key_state.api_base,
+                temperature=APIConfig.DEFAULT_TEMPERATURE,
+                timeout=APIConfig.REQUEST_TIMEOUT
+            )
+            return response.choices[0].message.content
 
-        result = await _call_with_key_pool(llm_pool, api_config, do_call, "Chat")
+        result, _ = await _call_with_key_pool(llm_pool, api_config, do_call, "Chat")
         return result
     else:
         model_name = api_config.get('model_name', '')
@@ -221,37 +215,24 @@ async def call_json_extraction_api(md_content, api_config, prompt_instructions):
             if not key_state.model_name:
                 raise APIResponseError("Extraction failed: LLM_MODEL not configured in multi-key settings")
 
-            try:
-                response = await asyncio.to_thread(
-                    completion,
-                    model=key_state.model_name,
-                    messages=[
-                        {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": f"{prompt_instructions}\n\nCONTENT:\n{md_content}"}
-                    ],
-                    api_key=key_state.key,
-                    api_base=key_state.api_base,
-                    temperature=APIConfig.DEFAULT_TEMPERATURE,
-                    timeout=APIConfig.REQUEST_TIMEOUT
-                )
-                raw_content = response.choices[0].message.content
-                await llm_pool.report_success(key_state)
+            response = await asyncio.to_thread(
+                completion,
+                model=key_state.model_name,
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": f"{prompt_instructions}\n\nCONTENT:\n{md_content}"}
+                ],
+                api_key=key_state.key,
+                api_base=key_state.api_base,
+                temperature=APIConfig.DEFAULT_TEMPERATURE,
+                timeout=APIConfig.REQUEST_TIMEOUT
+            )
+            raw_content = response.choices[0].message.content
+            raw_content = _extract_json_from_response(raw_content)
+            json.loads(raw_content)
+            return raw_content
 
-                raw_content = _extract_json_from_response(raw_content)
-                json.loads(raw_content)
-                return raw_content
-
-            except asyncio.TimeoutError:
-                await llm_pool.report_error(key_state, "Extraction timeout")
-                raise APIResponseError(f"Extraction timeout after {APIConfig.REQUEST_TIMEOUT}s")
-            except json.JSONDecodeError as e:
-                await llm_pool.report_error(key_state, "Invalid JSON")
-                raise APIResponseError(f"Model returned invalid JSON: {str(e)}", raw_content)
-            except Exception as e:
-                await llm_pool.report_error(key_state, str(e))
-                raise APIResponseError(f"Extraction failed: {str(e)}")
-
-        result = await _call_with_key_pool(llm_pool, api_config, do_call, "Extraction")
+        result, _ = await _call_with_key_pool(llm_pool, api_config, do_call, "Extraction")
         return result
     else:
         model_name = api_config.get('model_name', '')
@@ -278,11 +259,11 @@ async def call_json_extraction_api(md_content, api_config, prompt_instructions):
             return raw_content
 
         except asyncio.TimeoutError:
-            raise APIResponseError(f"Extraction timeout after {APIConfig.REQUEST_TIMEOUT}s")
+            return json.dumps({"error": "Extraction timeout"})
         except json.JSONDecodeError as e:
-            raise APIResponseError(f"Model returned invalid JSON: {str(e)}", raw_content)
+            return json.dumps({"error": "Model returned invalid JSON", "detail": str(e)})
         except Exception as e:
-            raise APIResponseError(f"Extraction failed: {str(e)}")
+            return json.dumps({"error": "Extraction failed", "detail": str(e)})
 
 def _extract_json_from_response(content: str) -> str:
     """从响应中提取 JSON 内容"""

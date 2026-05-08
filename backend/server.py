@@ -75,24 +75,33 @@ app.add_middleware(
 
 @app.get("/files/{filename}")
 async def serve_file(filename: str):
+    import posixpath
+
     decoded_filename = urllib.parse.unquote(filename)
 
     if '..' in decoded_filename or decoded_filename.startswith('/') or decoded_filename.startswith('\\'):
         raise HTTPException(status_code=400, detail="Invalid filename: path traversal detected")
 
-    file_path = os.path.normpath(os.path.join(state.workspace_path, decoded_filename))
+    safe_path = posixpath.normpath(decoded_filename)
+    if safe_path.startswith('..'):
+        raise HTTPException(status_code=400, detail="Invalid filename: path traversal detected")
 
-    if not file_path.startswith(os.path.normpath(state.workspace_path)):
+    file_path = os.path.join(state.workspace_path, safe_path)
+    normalized_workspace = os.path.normpath(state.workspace_path)
+    normalized_file_path = os.path.normpath(file_path)
+
+    common = os.path.commonpath([normalized_workspace, normalized_file_path])
+    if common != normalized_workspace:
         raise HTTPException(status_code=403, detail="Access denied: file outside workspace")
 
-    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+    if not os.path.exists(normalized_file_path) or not os.path.isfile(normalized_file_path):
         raise HTTPException(status_code=404, detail="File not found")
 
-    if os.path.getsize(file_path) == 0:
+    if os.path.getsize(normalized_file_path) == 0:
         raise HTTPException(status_code=400, detail="File is empty")
 
     return FileResponse(
-        file_path,
+        normalized_file_path,
         media_type='application/pdf',
         headers={"Content-Disposition": f"inline; filename={filename}"}
     )

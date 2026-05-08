@@ -70,32 +70,32 @@ class ServiceKeyPool:
     async def get_available_key(self) -> Optional[KeyState]:
         """
         获取可用的API密钥
-        修复：在锁外检查速率限制，避免死锁
+        修复：完全避免在锁内执行任何await操作
         """
         if not self._key_order:
             return None
 
-        candidates = []
-        async with self._async_lock:
-            checked_keys = 0
-            start_index = self._current_index
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            candidates = []
+            async with self._async_lock:
+                checked_keys = 0
+                while checked_keys < len(self._key_order):
+                    api_key = self._key_order[self._current_index]
+                    state = self._keys.get(api_key)
 
-            while checked_keys < len(self._key_order):
-                api_key = self._key_order[self._current_index]
-                state = self._keys.get(api_key)
+                    if state and self._is_key_healthy_sync(state):
+                        candidates.append(state)
 
-                if state and self._is_key_healthy_sync(state):
-                    candidates.append(state)
+                    self._current_index = (self._current_index + 1) % len(self._key_order)
+                    checked_keys += 1
 
-                self._current_index = (self._current_index + 1) % len(self._key_order)
-                checked_keys += 1
+            for state in candidates:
+                if await self._check_rate_limits(state):
+                    return state
 
-                if checked_keys >= len(self._key_order) and not candidates:
-                    await asyncio.sleep(KeyPoolConfig.RETRY_INTERVAL)
-
-        for state in candidates:
-            if await self._check_rate_limits(state):
-                return state
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(KeyPoolConfig.RETRY_INTERVAL * (attempt + 1))
 
         return None
 

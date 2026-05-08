@@ -48,33 +48,33 @@ export const SettingsModal = ({
     }
   };
 
-  const validateKeyConfig = (key: KeyConfig, index: number): ValidationError[] => {
+  const validateKeyConfig = (key: KeyConfig, index: number, type: 'ocr' | 'llm'): ValidationError[] => {
     const newErrors: ValidationError[] = [];
 
     if (!key.api_key || key.api_key.trim() === '') {
-      newErrors.push({ field: `ocr-${index}-api_key`, message: 'API Key is required' });
+      newErrors.push({ field: `${type}-${index}-api_key`, message: 'API Key is required' });
     }
 
     if (!key.api_base || key.api_base.trim() === '') {
-      newErrors.push({ field: `ocr-${index}-api_base`, message: 'API Base URL is required' });
+      newErrors.push({ field: `${type}-${index}-api_base`, message: 'API Base URL is required' });
     } else if (!key.api_base.startsWith('http://') && !key.api_base.startsWith('https://')) {
-      newErrors.push({ field: `ocr-${index}-api_base`, message: 'API Base URL must start with http:// or https://' });
+      newErrors.push({ field: `${type}-${index}-api_base`, message: 'API Base URL must start with http:// or https://' });
     }
 
     if (!key.model_name || key.model_name.trim() === '') {
-      newErrors.push({ field: `ocr-${index}-model_name`, message: 'Model name is required for multi-key mode' });
+      newErrors.push({ field: `${type}-${index}-model_name`, message: 'Model name is required for multi-key mode' });
     }
 
     if (key.max_concurrent !== undefined && key.max_concurrent < 1) {
-      newErrors.push({ field: `ocr-${index}-max_concurrent`, message: 'Max concurrent must be at least 1' });
+      newErrors.push({ field: `${type}-${index}-max_concurrent`, message: 'Max concurrent must be at least 1' });
     }
 
     if (key.rpm_limit !== undefined && key.rpm_limit < 1) {
-      newErrors.push({ field: `ocr-${index}-rpm_limit`, message: 'RPM limit must be at least 1' });
+      newErrors.push({ field: `${type}-${index}-rpm_limit`, message: 'RPM limit must be at least 1' });
     }
 
     if (key.tpm_limit !== undefined && key.tpm_limit < 1) {
-      newErrors.push({ field: `ocr-${index}-tpm_limit`, message: 'TPM limit must be at least 1' });
+      newErrors.push({ field: `${type}-${index}-tpm_limit`, message: 'TPM limit must be at least 1' });
     }
 
     return newErrors;
@@ -85,7 +85,7 @@ export const SettingsModal = ({
     const allErrors: ValidationError[] = [];
 
     keys.forEach((key, index) => {
-      allErrors.push(...validateKeyConfig(key, index));
+      allErrors.push(...validateKeyConfig(key, index, type));
     });
 
     if (allErrors.length > 0) {
@@ -134,16 +134,21 @@ export const SettingsModal = ({
       const updated = [...ocrKeys];
       updated[index] = { ...updated[index], [field]: value };
       setOcrKeys(updated);
+      const keyErrors = validateKeyConfig(updated[index], index, type);
+      setErrors(prev => [
+        ...prev.filter(e => !e.field.startsWith(`${type}-${index}`)),
+        ...keyErrors
+      ]);
     } else {
       const updated = [...llmKeys];
       updated[index] = { ...updated[index], [field]: value };
       setLlmKeys(updated);
+      const keyErrors = validateKeyConfig(updated[index], index, type);
+      setErrors(prev => [
+        ...prev.filter(e => !e.field.startsWith(`${type}-${index}`)),
+        ...keyErrors
+      ]);
     }
-
-    const key = type === 'ocr' ? ocrKeys[index] : llmKeys[index];
-    const updatedKey = { ...key, [field]: value };
-    const fieldErrors = validateKeyConfig(updatedKey, index);
-    setErrors(prev => prev.filter(e => e.field !== `${type}-${index}-${field}`));
   };
 
   const removeKey = (type: 'ocr' | 'llm', index: number) => {
