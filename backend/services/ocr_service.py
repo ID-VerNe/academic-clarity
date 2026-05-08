@@ -92,13 +92,13 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         total_pages = len(doc)
         
         config_service = ConfigService(db)
-        use_multi_key = config_service.initialize_key_manager()
+        pool_status = config_service.initialize_key_pools()
         ocr_api_config = config_service.get_ocr_config()
-        if use_multi_key:
+        if pool_status.get("ocr", False):
             ocr_api_config['_use_multi_key'] = True
 
-        if not ocr_api_config["api_key"] and not use_multi_key:
-            raise Exception("API Key missing")
+        if not ocr_api_config["api_key"] and not pool_status.get("ocr", False):
+            raise Exception("OCR API Key missing")
 
         page_tasks = []
         page_images = []
@@ -146,7 +146,7 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         """
         
         extract_api_config = config_service.get_extract_config()
-        if use_multi_key:
+        if pool_status.get("llm", False):
             extract_api_config['_use_multi_key'] = True
         try:
             metadata_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, default_prompt)

@@ -28,6 +28,8 @@ class AppState:
         self.db = None
         self.workspace_service = None
         self.use_multi_key = False
+        self.ocr_multi_key = False
+        self.llm_multi_key = False
 
     def initialize(self, path: str):
         if not os.path.exists(path):
@@ -36,9 +38,13 @@ class AppState:
         self.db = Database(os.path.join(path, "library.db"))
         self.workspace_service = WorkspaceService(path, self.db)
         config_service = ConfigService(self.db)
-        self.use_multi_key = config_service.initialize_key_manager()
+        pool_status = config_service.initialize_key_pools()
+        self.ocr_multi_key = pool_status.get("ocr", False)
+        self.llm_multi_key = pool_status.get("llm", False)
+        self.use_multi_key = self.ocr_multi_key or self.llm_multi_key
         print(f"[Core] Active workspace: {path}")
-        print(f"[Core] Multi-key mode: {'enabled' if self.use_multi_key else 'disabled'}")
+        print(f"[Core] OCR multi-key: {'enabled' if self.ocr_multi_key else 'disabled'}")
+        print(f"[Core] LLM multi-key: {'enabled' if self.llm_multi_key else 'disabled'}")
 
 state = AppState()
 
@@ -131,23 +137,41 @@ async def get_configs():
         "API_BASE": state.db.get_config("API_BASE", "https://api.siliconflow.cn/v1"),
         "WORKSPACE_PATH": state.workspace_path,
         "TABLE_STYLE": state.db.get_config("TABLE_STYLE", "three-line"),
-        "USE_MULTI_KEY": state.use_multi_key
+        "USE_MULTI_KEY": state.use_multi_key,
+        "OCR_MULTI_KEY": state.ocr_multi_key,
+        "LLM_MULTI_KEY": state.llm_multi_key
     }
 
 @app.get("/configs/multi-keys")
 async def get_multi_key_stats():
-    from core.api_key_manager import api_key_manager
+    from core.api_key_manager import key_manager
+    return key_manager.get_all_stats()
+
+@app.post("/configs/multi-keys/ocr")
+async def update_ocr_keys(ocr_keys: str = Query(...)):
+    state.db.set_config("OCR_API_KEYS", ocr_keys)
+    config_service = ConfigService(state.db)
+    pool_status = config_service.initialize_key_pools()
+    state.ocr_multi_key = pool_status.get("ocr", False)
+    state.use_multi_key = state.ocr_multi_key or state.llm_multi_key
     return {
-        "enabled": state.use_multi_key,
-        "keys": api_key_manager.get_key_stats()
+        "success": True,
+        "ocr_multi_key": state.ocr_multi_key,
+        "ocr_pool": key_manager.get_pool("ocr").get_stats() if key_manager.get_pool("ocr") else []
     }
 
-@app.post("/configs/multi-keys")
-async def update_multi_keys(multi_keys: str = Query(...)):
-    state.db.set_config("MULTI_API_KEYS", multi_keys)
+@app.post("/configs/multi-keys/llm")
+async def update_llm_keys(llm_keys: str = Query(...)):
+    state.db.set_config("LLM_API_KEYS", llm_keys)
     config_service = ConfigService(state.db)
-    state.use_multi_key = config_service.initialize_key_manager()
-    return {"success": True, "use_multi_key": state.use_multi_key}
+    pool_status = config_service.initialize_key_pools()
+    state.llm_multi_key = pool_status.get("llm", False)
+    state.use_multi_key = state.ocr_multi_key or state.llm_multi_key
+    return {
+        "success": True,
+        "llm_multi_key": state.llm_multi_key,
+        "llm_pool": key_manager.get_pool("llm").get_stats() if key_manager.get_pool("llm") else []
+    }
 
 @app.post("/configs")
 async def set_config(key: str = Query(...), value: str = Query(...)):
@@ -206,7 +230,7 @@ async def trigger_custom_extraction(doc_id: int, request: MetadataRequest):
     
     config_service = ConfigService(state.db)
     extract_api_config = config_service.get_extract_config()
-    if state.use_multi_key:
+    if state.llm_multi_key:
         extract_api_config['_use_multi_key'] = True
     
     try:
@@ -233,7 +257,7 @@ async def chat_with_doc(request: ChatRequest):
         return {"response": "OCR results not available."}
     config_service = ConfigService(state.db)
     api_config = config_service.get_chat_config()
-    if state.use_multi_key:
+    if state.llm_multi_key:
         api_config['_use_multi_key'] = True
     try:
         response = await call_chat_api(request.query, doc['ocr_markdown'], api_config)
