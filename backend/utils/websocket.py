@@ -5,10 +5,9 @@ Academic Clarity - WebSocket 实时进度推送服务
 import asyncio
 import json
 import time
-from typing import Dict, Set, Optional, Callable, Any
+from typing import Dict, Set, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
-import threading
 
 class EventType(str, Enum):
     TASK_STARTED = "task_started"
@@ -49,16 +48,14 @@ class WSMessage:
         )
 
 class ConnectionManager:
-    """WebSocket连接管理器"""
+    """WebSocket连接管理器 - 使用asyncio.Lock替代threading.Lock"""
     _instance = None
-    _lock = threading.Lock()
+    _lock: Optional[asyncio.Lock] = None
 
     def __new__(cls):
         if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
@@ -77,18 +74,16 @@ class ConnectionManager:
         }
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._message_id_counter = 0
-        self._message_id_lock = threading.Lock()
 
     async def connect(self, websocket, channels: Optional[list] = None):
         async with self._connection_lock:
             self._connections.add(websocket)
+            self._subscribers["all"].add(websocket)
 
-        self._subscribers["all"].add(websocket)
-
-        if channels:
-            for channel in channels:
-                if channel != "all" and channel in self._subscribers:
-                    self._subscribers[channel].add(websocket)
+            if channels:
+                for channel in channels:
+                    if channel != "all" and channel in self._subscribers:
+                        self._subscribers[channel].add(websocket)
 
         await self.broadcast_safe(EventType.SYSTEM_STATUS, {
             "connected": True,
@@ -98,9 +93,8 @@ class ConnectionManager:
     async def disconnect(self, websocket):
         async with self._connection_lock:
             self._connections.discard(websocket)
-
-        for channel_subscribers in self._subscribers.values():
-            channel_subscribers.discard(websocket)
+            for channel_subscribers in self._subscribers.values():
+                channel_subscribers.discard(websocket)
 
         await self.broadcast_safe(EventType.SYSTEM_STATUS, {
             "connected": False,
@@ -108,9 +102,8 @@ class ConnectionManager:
         }, channels=["all"])
 
     def _generate_message_id(self) -> str:
-        with self._message_id_lock:
-            self._message_id_counter += 1
-            return f"msg_{self._message_id_counter}_{int(time.time() * 1000)}"
+        self._message_id_counter += 1
+        return f"msg_{self._message_id_counter}_{int(time.time() * 1000)}"
 
     async def send(self, websocket, event: EventType, data: Dict[str, Any]):
         try:
@@ -141,26 +134,28 @@ class ConnectionManager:
         )
         message_str = message.to_json()
 
-        target_channels = channels or list(self._subscribers.keys())
-        targets = set()
+        async with self._connection_lock:
+            target_channels = channels or list(self._subscribers.keys())
+            targets = set()
 
-        for channel in target_channels:
-            if channel in self._subscribers:
-                targets.update(self._subscribers[channel])
+            for channel in target_channels:
+                if channel in self._subscribers:
+                    targets.update(self._subscribers[channel])
 
-        if exclude:
-            targets -= exclude
+            if exclude:
+                targets -= exclude
 
-        disconnected = set()
-        for websocket in targets:
-            try:
-                await websocket.send_text(message_str)
-            except Exception:
-                disconnected.add(websocket)
+            disconnected = set()
+            for websocket in targets:
+                try:
+                    await websocket.send_text(message_str)
+                except Exception:
+                    disconnected.add(websocket)
 
-        for ws in disconnected:
-            if ws in self._connections:
-                await self.disconnect(ws)
+            for ws in disconnected:
+                self._connections.discard(ws)
+                for channel_subscribers in self._subscribers.values():
+                    channel_subscribers.discard(ws)
 
     async def send_task_update(self, doc_id: int, status: str, progress: float = 0,
                               message: str = "", metadata: Optional[Dict] = None):
@@ -224,14 +219,11 @@ ws_manager = ConnectionManager()
 class WebSocketProgressTracker:
     """任务进度追踪器"""
     _instance = None
-    _lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
@@ -239,49 +231,60 @@ class WebSocketProgressTracker:
             return
         self._initialized = True
         self._active_tasks: Dict[int, Dict] = {}
+        self._lock = asyncio.Lock()
 
     async def track_task_start(self, doc_id: int, task_type: str = "ocr"):
-        self._active_tasks[doc_id] = {
-            "type": task_type,
-            "start_time": time.time(),
-            "progress": 0,
-            "last_update": time.time(),
-            "steps": []
-        }
+        async with self._lock:
+            self._active_tasks[doc_id] = {
+                "type": task_type,
+                "start_time": time.time(),
+                "progress": 0,
+                "last_update": time.time(),
+                "steps": []
+            }
         await ws_manager.send_task_update(doc_id, "pending", 0, "Task started")
 
     async def track_task_progress(self, doc_id: int, progress: float,
                                    step: Optional[str] = None):
-        if doc_id not in self._active_tasks:
-            await self.track_task_start(doc_id)
+        async with self._lock:
+            if doc_id not in self._active_tasks:
+                self._active_tasks[doc_id] = {
+                    "type": "ocr",
+                    "start_time": time.time(),
+                    "progress": 0,
+                    "last_update": time.time(),
+                    "steps": []
+                }
 
-        task = self._active_tasks[doc_id]
-        task["progress"] = progress
-        task["last_update"] = time.time()
-        if step:
-            task["steps"].append({
-                "step": step,
-                "timestamp": time.time()
-            })
+            task = self._active_tasks[doc_id]
+            task["progress"] = progress
+            task["last_update"] = time.time()
+            if step:
+                task["steps"].append({
+                    "step": step,
+                    "timestamp": time.time()
+                })
 
         await ws_manager.send_task_update(doc_id, "processing", progress, step)
 
     async def track_task_complete(self, doc_id: int, result: Optional[Dict] = None):
-        if doc_id in self._active_tasks:
-            task = self._active_tasks[doc_id]
-            duration = time.time() - task["start_time"]
-            task["duration"] = duration
-            del self._active_tasks[doc_id]
+        async with self._lock:
+            if doc_id in self._active_tasks:
+                task = self._active_tasks[doc_id]
+                duration = time.time() - task["start_time"]
+                task["duration"] = duration
+                del self._active_tasks[doc_id]
 
         await ws_manager.send_task_update(doc_id, "completed", 100, "Task completed", result)
 
     async def track_task_failure(self, doc_id: int, error: str):
-        if doc_id in self._active_tasks:
-            task = self._active_tasks[doc_id]
-            duration = time.time() - task["start_time"]
-            task["duration"] = duration
-            task["error"] = error
-            del self._active_tasks[doc_id]
+        async with self._lock:
+            if doc_id in self._active_tasks:
+                task = self._active_tasks[doc_id]
+                duration = time.time() - task["start_time"]
+                task["duration"] = duration
+                task["error"] = error
+                del self._active_tasks[doc_id]
 
         await ws_manager.send_task_update(doc_id, "failed", 0, error)
 

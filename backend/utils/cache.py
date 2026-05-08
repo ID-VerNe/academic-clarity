@@ -7,7 +7,6 @@ import time
 from typing import Optional, Any, Dict, List
 from dataclasses import dataclass
 from enum import Enum
-import threading
 
 try:
     from backend.constants import CacheConfig as BackendCacheConfig
@@ -50,24 +49,10 @@ class CacheEntry:
         self.access_count += 1
 
 class InMemoryCache:
-    """内存缓存实现 - 当Redis不可用时使用"""
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls, max_size: int = 1000):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
-
-    def __init__(self, max_size: int = 1000):
-        if self._initialized:
-            return
-        self._initialized = True
+    """内存缓存实现 - 非单例模式，支持多实例"""
+    def __init__(self, max_size: int = None):
+        self._max_size = max_size or CacheConfig.MAX_IN_MEMORY_SIZE
         self._cache: Dict[str, CacheEntry] = {}
-        self._max_size = max_size
         self._access_order: List[str] = []
 
     def get(self, key: str) -> Optional[Any]:
@@ -135,10 +120,10 @@ class RedisCache:
     """Redis缓存实现"""
     def __init__(self, host: str = "localhost", port: int = 6379,
                  db: int = 0, password: Optional[str] = None,
-                 key_prefix: str = "ac:"):
+                 key_prefix: str = "ac:", fallback_max_size: int = None):
         self._key_prefix = key_prefix
         self._redis = None
-        self._fallback = InMemoryCache(CacheConfig.MAX_IN_MEMORY_SIZE)
+        self._fallback = InMemoryCache(fallback_max_size or CacheConfig.MAX_IN_MEMORY_SIZE)
         self._connected = False
 
         try:
@@ -242,27 +227,12 @@ class RedisCache:
 
 
 class CacheManager:
-    """缓存管理器"""
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls, redis_host: Optional[str] = None, redis_port: int = 6379):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
-
+    """缓存管理器 - 非单例模式"""
     def __init__(self, redis_host: Optional[str] = None, redis_port: int = 6379):
-        if self._initialized:
-            return
-        self._initialized = True
-
         if redis_host:
             self.cache = RedisCache(host=redis_host, port=redis_port)
         else:
-            self.cache = InMemoryCache(CacheConfig.MAX_IN_MEMORY_SIZE)
+            self.cache = InMemoryCache()
 
         self._document_cache = DocumentCache(self.cache)
         self._metadata_cache = MetadataCache(self.cache)
