@@ -10,9 +10,24 @@ from services.ai_service import call_ocr_api, call_json_extraction_api
 from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown
 from services.config_service import ConfigService
 
+try:
+    from backend.constants import OCRConfig, MetadataConfig
+except ImportError:
+    from constants import OCRConfig, MetadataConfig
+
 class EmptyFileError(Exception):
     """Raised when the PDF file is 0 bytes or essentially empty."""
     pass
+
+class PageOCRFailedError(Exception):
+    """Raised when a single page fails to OCR after all retries."""
+    def __init__(self, page_idx: int, total_pages: int, original_error: str):
+        self.page_idx = page_idx
+        self.total_pages = total_pages
+        self.original_error = original_error
+        super().__init__(
+            f"OCR failed for page {page_idx + 1}/{total_pages}: {original_error}"
+        )
 
 def replace_image_tags_with_markdown(content, image):
     """
@@ -29,7 +44,6 @@ def replace_image_tags_with_markdown(content, image):
         ref_text = (match.group(1) or "").strip()
         det_text = (match.group(2) or "").strip()
 
-        # Keep textual grounding in markdown; extract actual image regions as embedded images.
         if ref_text.lower() != "image":
             return ref_text
 
@@ -59,30 +73,46 @@ def replace_image_tags_with_markdown(content, image):
         return "\n".join(images_md)
 
     replaced = pattern.sub(replacement, content)
-    # Drop any leftover broken tags from partial responses
     replaced = re.sub(r'<\|/?ref\|>|<\|/?det\|>', '', replaced)
     return replaced
 
-async def process_page_task(page_idx, total_pages, pix_data, api_config, retries=3):
+async def process_page_task(page_idx, total_pages, pix_data, api_config, retries=None):
     """
     Task for processing a single page of a PDF with automatic retries.
+    Raises PageOCRFailedError instead of silently returning error messages.
     """
+    if retries is None:
+        retries = OCRConfig.MAX_RETRIES
+
+    last_error = None
+
     for attempt in range(retries):
         print(f"[OCR] Processing Page {page_idx + 1}/{total_pages} (Attempt {attempt + 1})...")
         try:
             image = Image.open(BytesIO(pix_data))
             content = await call_ocr_api(image, api_config)
+
+            if isinstance(content, str) and content.startswith("OCR Failed:"):
+                last_error = content
+                backoff = OCRConfig.PAGE_RETRY_BACKOFF[attempt] if attempt < len(OCRConfig.PAGE_RETRY_BACKOFF) else OCRConfig.PAGE_RETRY_BACKOFF[-1]
+                if attempt < retries - 1:
+                    await asyncio.sleep(backoff)
+                continue
+
             return content
+
         except Exception as e:
-            wait_time = (attempt + 1) * 2
-            print(f"  [OCR] Page {page_idx + 1} failed: {e}. Retrying...")
+            last_error = str(e)
+            backoff = OCRConfig.PAGE_RETRY_BACKOFF[attempt] if attempt < len(OCRConfig.PAGE_RETRY_BACKOFF) else OCRConfig.PAGE_RETRY_BACKOFF[-1]
             if attempt < retries - 1:
-                await asyncio.sleep(wait_time)
-            else:
-                return f"\n\n> [Error on Page {page_idx + 1}]\n\n"
+                await asyncio.sleep(backoff)
+
+    raise PageOCRFailedError(page_idx, total_pages, last_error or "Unknown error")
 
 async def run_full_ocr_workflow(doc_id, pdf_path, db):
     print(f"[TaskHub] Starting Full Pipeline for: {os.path.basename(pdf_path)}")
+    failed_pages = []
+
     try:
         if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
             raise EmptyFileError(f"File {pdf_path} is empty or missing.")
@@ -90,7 +120,7 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         db.update_document_ocr(doc_id, "processing")
         doc = fitz.open(pdf_path)
         total_pages = len(doc)
-        
+
         config_service = ConfigService(db)
         pool_status = config_service.initialize_key_pools()
         ocr_api_config = config_service.get_ocr_config()
@@ -110,29 +140,35 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
             except Exception:
                 page_images.append(Image.new("RGB", (1, 1), "white"))
             page_tasks.append(process_page_task(i, total_pages, pix_bytes, ocr_api_config))
-        
-        page_results = await asyncio.gather(*page_tasks)
+
+        results = await asyncio.gather(*page_tasks, return_exceptions=True)
         doc.close()
 
-        page_markdowns = [
-            replace_image_tags_with_markdown(page_results[i], page_images[i])
-            for i in range(total_pages)
-        ]
+        page_markdowns = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                failed_pages.append(i + 1)
+                error_msg = str(result)
+                page_markdowns.append(f"\n\n> [Error on Page {i + 1}/{total_pages}] {error_msg}\n\n")
+                print(f"[OCR] Page {i + 1} failed: {error_msg}")
+            else:
+                page_markdowns.append(replace_image_tags_with_markdown(result, page_images[i]))
 
         raw_full_content = "\n\n".join(page_markdowns)
         cleaned_markdown = clean_ocr_markdown(raw_full_content)
         title = extract_title_from_markdown(raw_full_content)
-        
+
         print(f"[TaskHub] Stage 2: Deep Extraction for {title}")
+
         default_prompt = """
-        You are a world-class academic metadata curator. 
+        You are a world-class academic metadata curator.
         Your mission is to extract precise metadata from the provided markdown.
-        
+
         ### CRITICAL MISSION: DOI EXTRACTION
         - Look for strings starting with '10.' followed by a prefix and suffix (e.g., 10.1109/TVCG.2023.12345).
         - The DOI is often located in the very first or last lines of the markdown, or within 'Footnotes' section.
         - If you find multiple, pick the one that looks like a formal document identifier.
-        
+
         ### OTHER FIELDS
         - title: The full academic title.
         - authors: All authors as a comma-separated string.
@@ -141,21 +177,30 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         - abstract: A sharp 2-3 sentence summary.
         - keywords: 5-8 relevant terms.
         - summary: 3 power-bullets on 'Novelty', 'Method', and 'Impact'.
-        
+
         Return ONLY a JSON object.
         """
-        
+
         extract_api_config = config_service.get_extract_config()
         if pool_status.get("llm", False):
             extract_api_config['_use_multi_key'] = True
+
         try:
             metadata_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, default_prompt)
-            db.add_document_metadata(doc_id, "Basic Insight", metadata_json)
+            db.add_document_metadata(doc_id, MetadataConfig.DEFAULT_LABEL, metadata_json)
         except Exception as e:
             print(f"[TaskHub] Metadata Stage Error: {e}")
 
-        db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, raw=raw_full_content, title=title)
+        if failed_pages:
+            status_note = f" (Partial: {len(failed_pages)} pages failed: {failed_pages})"
+            print(f"[TaskHub] Pipeline completed with failures: {status_note}")
+            db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, raw=raw_full_content, title=title)
+            import json
+            db.add_document_metadata(doc_id, "OCR Failures", json.dumps({"failed_pages": failed_pages, "total_pages": total_pages}))
+        else:
+            db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, raw=raw_full_content, title=title)
         print(f"[TaskHub] Pipeline SUCCESS: {title}")
+
     except Exception as e:
         print(f"[TaskHub] Pipeline CRITICAL ERROR: {e}")
         db.update_document_ocr(doc_id, "failed")

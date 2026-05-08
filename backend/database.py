@@ -1,32 +1,50 @@
 import sqlite3
 import os
+import threading
+from contextlib import contextmanager
 from utils.text_processor import parse_structured_ocr_content
 
+try:
+    from backend.constants import DBConfig
+except ImportError:
+    from constants import DBConfig
+
 class Database:
+    _write_lock = threading.Lock()
+
     def __init__(self, db_path):
         self.db_path = db_path
         self.init_db()
 
     def get_connection(self):
-        # Set busy timeout to 30,000ms
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        # Enable WAL mode
+        conn = sqlite3.connect(self.db_path, timeout=DBConfig.TIMEOUT)
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
+    @contextmanager
+    def safe_write(self):
+        """线程安全的写操作"""
+        with Database._write_lock:
+            conn = self.get_connection()
+            try:
+                cursor = conn.cursor()
+                yield cursor
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
     def init_db(self):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            # Ensure WAL mode is active
+        with self.safe_write() as cursor:
             cursor.execute("PRAGMA journal_mode=WAL")
-            # 配置表
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS configs (
                     key TEXT PRIMARY KEY,
                     value TEXT
                 )
             ''')
-            # 文献表
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS documents (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,15 +53,14 @@ class Database:
                     stored_path TEXT,
                     title TEXT,
                     authors TEXT,
-                    ocr_status TEXT DEFAULT 'pending', 
+                    ocr_status TEXT DEFAULT 'pending',
                     ocr_markdown TEXT,
                     ocr_raw TEXT,
                     metadata_json TEXT,
                     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            
-            # 兼容性升级: 创建多维元数据表
+
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS document_metadata (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,14 +71,11 @@ class Database:
                     FOREIGN KEY (doc_id) REFERENCES documents (id)
                 )
             ''')
-            conn.commit()
 
     def add_document_metadata(self, doc_id, label, content_json):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+        with self.safe_write() as cursor:
             cursor.execute('INSERT INTO document_metadata (doc_id, label, content_json) VALUES (?, ?, ?)',
                          (doc_id, label, content_json))
-            conn.commit()
             return cursor.lastrowid
 
     def get_document_metadata(self, doc_id):
@@ -72,10 +86,8 @@ class Database:
             return [dict(row) for row in cursor.fetchall()]
 
     def delete_metadata(self, metadata_id):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+        with self.safe_write() as cursor:
             cursor.execute('DELETE FROM document_metadata WHERE id = ?', (metadata_id,))
-            conn.commit()
 
     def get_config(self, key, default=None):
         with self.get_connection() as conn:
@@ -85,14 +97,11 @@ class Database:
             return row[0] if row else default
 
     def set_config(self, key, value):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+        with self.safe_write() as cursor:
             cursor.execute('INSERT OR REPLACE INTO configs (key, value) VALUES (?, ?)', (key, value))
-            conn.commit()
 
     def add_document(self, filename, original_path, stored_path):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+        with self.safe_write() as cursor:
             cursor.execute('''
                 INSERT INTO documents (filename, original_path, stored_path)
                 VALUES (?, ?, ?)
@@ -100,12 +109,11 @@ class Database:
             return cursor.lastrowid
 
     def update_document_ocr(self, doc_id, status, markdown=None, raw=None, title=None, metadata_json=None):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+        with self.safe_write() as cursor:
             updates = ["ocr_status = ?"]
             params = [status]
-            
-            if markdown: 
+
+            if markdown:
                 updates.append("ocr_markdown = ?")
                 params.append(markdown)
             if raw:
@@ -117,17 +125,14 @@ class Database:
             if metadata_json:
                 updates.append("metadata_json = ?")
                 params.append(metadata_json)
-                
+
             params.append(doc_id)
             sql = f"UPDATE documents SET {', '.join(updates)} WHERE id = ?"
             cursor.execute(sql, params)
-            conn.commit()
-            
+
     def delete_document(self, doc_id):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+        with self.safe_write() as cursor:
             cursor.execute('DELETE FROM documents WHERE id = ?', (doc_id,))
-            conn.commit()
             return cursor.rowcount > 0
 
     def get_document(self, doc_id):
@@ -146,7 +151,6 @@ class Database:
         with self.get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            # 聚合查询：带入最新的 Basic Insight 元数据
             cursor.execute('''
                 SELECT d.*, m.content_json as basic_insight_json
                 FROM documents d
