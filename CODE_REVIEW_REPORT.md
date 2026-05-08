@@ -19,7 +19,7 @@
 | 3.1 | 路径遍历漏洞 | 🟡 中等 | ✅ 已修复 | server.py |
 | 3.2 | 同步文件操作阻塞事件循环 | 🟡 中等 | ✅ 已修复 | workspace_service.py |
 | 3.3 | 缺少请求超时控制 | 🟡 中等 | ✅ 已修复 | ai_service.py |
-| 4.1 | 魔法数字硬编码 | 🟢 低 | ✅ 已修复 | config.py |
+| 4.1 | 魔法数字硬编码 | 🟢 低 | ✅ 已修复 | constants.py |
 | 4.2 | 前端类型安全 | 🟠 高 | ✅ 已修复 | SettingsModal.tsx |
 
 ---

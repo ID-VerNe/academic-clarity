@@ -18,6 +18,21 @@ interface ValidationError {
   message: string;
 }
 
+interface KeyStatsDisplay {
+  api_key: string;
+  api_base: string;
+  model_name: string;
+  max_concurrent: number;
+  rpm_limit: number;
+  tpm_limit: number;
+  enabled: boolean;
+  is_healthy?: boolean;
+  active_requests?: number;
+  rpm_used?: number;
+  tpm_used?: number;
+  consecutive_errors?: number;
+}
+
 export const SettingsModal = ({
   isOpen,
   onClose,
@@ -105,7 +120,8 @@ export const SettingsModal = ({
       setShowAddForm(false);
     } catch (error) {
       console.error('Failed to save keys:', error);
-      setErrors([{ field: 'general', message: `Failed to save: ${error}` }]);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setErrors([{ field: 'general', message: `Failed to save: ${errorMessage}` }]);
     } finally {
       setIsSaving(false);
     }
@@ -152,24 +168,29 @@ export const SettingsModal = ({
   };
 
   const removeKey = (type: 'ocr' | 'llm', index: number) => {
+    const otherType = type === 'ocr' ? 'llm' : 'ocr';
+    const otherKeys = type === 'ocr' ? llmKeys : ocrKeys;
+
     if (type === 'ocr') {
       const updated = ocrKeys.filter((_, i) => i !== index);
       setOcrKeys(updated);
-      const newErrors = updated.flatMap((key, i) => validateKeyConfig(key, i, type));
-      setErrors(newErrors);
+      const newOcrErrors = updated.flatMap((key, i) => validateKeyConfig(key, i, type));
+      const otherErrors = errors.filter(e => e.field.startsWith(otherType));
+      setErrors([...newOcrErrors, ...otherErrors]);
       if (updated.length === 0) setShowAddForm(false);
     } else {
       const updated = llmKeys.filter((_, i) => i !== index);
       setLlmKeys(updated);
-      const newErrors = updated.flatMap((key, i) => validateKeyConfig(key, i, type));
-      setErrors(newErrors);
+      const newLlmErrors = updated.flatMap((key, i) => validateKeyConfig(key, i, type));
+      const otherErrors = errors.filter(e => e.field.startsWith(otherType));
+      setErrors([...newLlmErrors, ...otherErrors]);
       if (updated.length === 0) setShowAddForm(false);
     }
   };
 
   const loadKeysToEdit = (pool: KeyPoolStats | undefined, type: 'ocr' | 'llm') => {
     if (pool?.keys) {
-      const keys = pool.keys.map(k => ({
+      const keys = pool.keys.map((k: KeyStatsDisplay) => ({
         api_key: '',
         api_base: k.api_base,
         model_name: k.model_name,
@@ -207,16 +228,17 @@ export const SettingsModal = ({
     </button>
   );
 
-  const renderKeyCard = (key: any, index: number, type: 'ocr' | 'llm') => {
+  const renderKeyCard = (key: KeyConfig | KeyStatsDisplay, index: number, type: 'ocr' | 'llm') => {
     const apiKeyError = getError(`${type}-${index}-api_key`);
     const apiBaseError = getError(`${type}-${index}-api_base`);
     const modelError = getError(`${type}-${index}-model_name`);
+    const isStats = 'is_healthy' in key && key.is_healthy !== undefined;
 
     return (
       <div key={index} className={`bg-white border rounded-xl p-4 space-y-3 ${apiKeyError || apiBaseError || modelError ? 'border-red-300' : 'border-slate-200'}`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {key.is_healthy !== undefined ? (
+            {isStats ? (
               key.is_healthy ? (
                 <CheckCircle className="w-4 h-4 text-green-500" />
               ) : (
@@ -226,7 +248,7 @@ export const SettingsModal = ({
               <Plus className="w-4 h-4 text-slate-400" />
             )}
             <span className="text-xs font-mono text-slate-600">
-              {key.api_key?.slice(0, 8) || 'not set'}...{key.api_key?.slice(-4) || ''}
+              {'api_key' in key && key.api_key ? `${key.api_key.slice(0, 8)}...${key.api_key.slice(-4)}` : 'not set'}
             </span>
           </div>
           {showAddForm && (
@@ -239,7 +261,7 @@ export const SettingsModal = ({
           )}
         </div>
 
-        {showAddForm ? (
+        {showAddForm && 'api_key' in key ? (
           <>
             <div>
               <input
@@ -316,19 +338,19 @@ export const SettingsModal = ({
         ) : (
           <div className="grid grid-cols-4 gap-2 text-xs text-slate-500">
             <div className="bg-slate-50 rounded-lg px-3 py-2 text-center">
-              <div className="font-bold text-slate-700">{key.active_requests || 0}/{key.max_concurrent || 5}</div>
+              <div className="font-bold text-slate-700">{'active_requests' in key ? `${key.active_requests}/${key.max_concurrent}` : '-'}</div>
               <div className="text-[10px] text-slate-400">Concurrent</div>
             </div>
             <div className="bg-slate-50 rounded-lg px-3 py-2 text-center">
-              <div className="font-bold text-slate-700">{key.rpm_used || 0}/{key.rpm_limit || 60}</div>
+              <div className="font-bold text-slate-700">{'rpm_used' in key ? `${key.rpm_used}/${key.rpm_limit}` : '-'}</div>
               <div className="text-[10px] text-slate-400">RPM</div>
             </div>
             <div className="bg-slate-50 rounded-lg px-3 py-2 text-center">
-              <div className="font-bold text-slate-700">{((key.tpm_used || 0) / 1000).toFixed(0)}K</div>
+              <div className="font-bold text-slate-700">{'tpm_used' in key ? `${((key.tpm_used || 0) / 1000).toFixed(0)}K` : '-'}</div>
               <div className="text-[10px] text-slate-400">TPM Used</div>
             </div>
             <div className="bg-slate-50 rounded-lg px-3 py-2 text-center">
-              <div className="font-bold text-slate-700">{key.consecutive_errors || 0}</div>
+              <div className="font-bold text-slate-700">{'consecutive_errors' in key ? key.consecutive_errors : '-'}</div>
               <div className="text-[10px] text-slate-400">Errors</div>
             </div>
           </div>
@@ -375,12 +397,12 @@ export const SettingsModal = ({
 
       {pool?.keys && pool.keys.length > 0 && !showAddForm ? (
         <div className="space-y-2">
-          {pool.keys.map((key, index) => renderKeyCard(key, index, type))}
+          {pool.keys.map((key: KeyStatsDisplay, index: number) => renderKeyCard(key, index, type))}
         </div>
       ) : (
         <div className="space-y-2">
-          {showAddForm && (type === 'ocr' ? ocrKeys : llmKeys).map((key, index) => renderKeyCard(key, index, type))}
-          {!showAddForm && (
+          {(type === 'ocr' ? ocrKeys : llmKeys).map((key, index) => renderKeyCard(key, index, type))}
+          {!showAddForm && (type === 'ocr' ? ocrKeys : llmKeys).length === 0 && (
             <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center">
               <p className="text-xs text-slate-400">No keys configured</p>
               <button

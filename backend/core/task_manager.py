@@ -19,6 +19,8 @@ class TaskManager:
         self.active_task_ids: set = set()
         self.failed_task_ids: Dict[int, tuple] = {}
         self._app_state = None
+        self._cleanup_task = None
+        self._last_cleanup = time.time()
 
     async def start_workers(self, app_state):
         """启动指定数量的并行 Worker"""
@@ -27,6 +29,29 @@ class TaskManager:
         for i in range(self.concurrency):
             worker = asyncio.create_task(self._worker_loop(i, app_state))
             self.workers.append(worker)
+        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+
+    def _cleanup_old_failures(self):
+        """清理过期的失败任务记录，防止内存无限增长"""
+        if len(self.failed_task_ids) <= TaskConfig.MAX_FAILED_TASKS:
+            return
+
+        sorted_tasks = sorted(
+            self.failed_task_ids.items(),
+            key=lambda x: x[1][1]
+        )
+
+        to_remove = len(self.failed_task_ids) - TaskConfig.MAX_FAILED_TASKS
+        for doc_id, _ in sorted_tasks[:to_remove]:
+            self.failed_task_ids.pop(doc_id, None)
+
+        print(f"[TaskHub] Cleaned up {to_remove} old failed task records")
+
+    async def _cleanup_loop(self):
+        """定期清理失败的记录"""
+        while True:
+            await asyncio.sleep(300)
+            self._cleanup_old_failures()
 
     async def add_task(self, doc_id, task_func, *args, force: bool = False):
         """向队尾添加任务
@@ -57,6 +82,7 @@ class TaskManager:
         print(f"[TaskHub] Scheduling retry {retries}/{TaskConfig.MAX_RETRIES} for Doc {doc_id} in {backoff}s (non-blocking)")
         await asyncio.sleep(backoff)
         self.failed_task_ids[doc_id] = (retries, time.time())
+        self._cleanup_old_failures()
         await self.queue.put((doc_id, task_func, args, retries))
 
     async def _worker_loop(self, worker_id, app_state):
@@ -78,6 +104,7 @@ class TaskManager:
                 else:
                     self.active_task_ids.discard(doc_id)
                     self.failed_task_ids[doc_id] = (retries, time.time())
+                    self._cleanup_old_failures()
                     print(f"[Worker-{worker_id}] Max retries reached for Doc: {doc_id}. Giving up.")
 
             self.queue.task_done()
@@ -93,5 +120,13 @@ class TaskManager:
                 for doc_id, (fail_count, last_fail) in self.failed_task_ids.items()
             ]
         }
+
+    async def shutdown(self):
+        """优雅关闭任务管理器"""
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+        for worker in self.workers:
+            worker.cancel()
+        await asyncio.gather(*self.workers, return_exceptions=True)
 
 task_hub = TaskManager()

@@ -136,14 +136,29 @@ class ServiceKeyPool:
         return True
 
     async def acquire_key(self) -> Optional[KeyState]:
-        """获取密钥并增加活跃请求计数"""
-        key_state = await self.get_available_key()
-        if key_state:
-            async with key_state.lock:
-                key_state.active_requests += 1
-                key_state.last_used = time.time()
-            self._request_times[key_state.key].append(time.time())
-        return key_state
+        """获取密钥并原子性地增加活跃请求计数"""
+        while True:
+            candidates = []
+            async with self._async_lock:
+                checked_keys = 0
+                while checked_keys < len(self._key_order):
+                    api_key = self._key_order[self._current_index]
+                    state = self._keys.get(api_key)
+                    if state and self._is_key_healthy_sync(state):
+                        candidates.append(state)
+                    self._current_index = (self._current_index + 1) % len(self._key_order)
+                    checked_keys += 1
+
+            for state in candidates:
+                async with state.lock:
+                    if state.active_requests < state.max_concurrent:
+                        state.active_requests += 1
+                        state.last_used = time.time()
+                        self._request_times[state.key].append(time.time())
+                        return state
+
+            await asyncio.sleep(KeyPoolConfig.RETRY_INTERVAL)
+        return None
 
     async def release_key(self, state: KeyState, tokens_used: int = 0):
         """释放密钥"""

@@ -8,9 +8,9 @@ from litellm import completion
 from core.api_key_manager import key_manager, KeyState, ServiceKeyPool
 
 try:
-    from backend.constants import APIConfig, OCRConfig
+    from backend.constants import APIConfig
 except ImportError:
-    from constants import APIConfig, OCRConfig
+    from constants import APIConfig
 
 class APIKeyPoolExhaustedError(Exception):
     """所有 API 密钥都不可用"""
@@ -41,7 +41,6 @@ def _extract_tokens_from_response(response) -> int:
 
 async def _call_with_key_pool(
     pool: Optional[ServiceKeyPool],
-    fallback_config: dict,
     api_call_func: Callable,
     error_context: str = "API call"
 ) -> tuple:
@@ -118,7 +117,7 @@ async def call_ocr_api(image, api_config):
             tokens_used = _extract_tokens_from_response(response)
             return (response.choices[0].message.content, tokens_used)
 
-        result, tokens = await _call_with_key_pool(ocr_pool, api_config, do_call, "OCR")
+        result, tokens = await _call_with_key_pool(ocr_pool, do_call, "OCR")
         if isinstance(result, str) and result.startswith("Failed:"):
             return result
         return result
@@ -174,7 +173,7 @@ async def call_chat_api(query, context, api_config):
             )
             return response.choices[0].message.content
 
-        result, _ = await _call_with_key_pool(llm_pool, api_config, do_call, "Chat")
+        result, _ = await _call_with_key_pool(llm_pool, do_call, "Chat")
         return result
     else:
         model_name = api_config.get('model_name', '')
@@ -232,7 +231,7 @@ async def call_json_extraction_api(md_content, api_config, prompt_instructions):
             json.loads(raw_content)
             return raw_content
 
-        result, _ = await _call_with_key_pool(llm_pool, api_config, do_call, "Extraction")
+        result, _ = await _call_with_key_pool(llm_pool, do_call, "Extraction")
         return result
     else:
         model_name = api_config.get('model_name', '')
