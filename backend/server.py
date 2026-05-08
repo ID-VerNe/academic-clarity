@@ -2,20 +2,20 @@ import os
 import sys
 import shutil
 import urllib.parse
-import time
 import uvicorn
 import asyncio
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Request
+import time
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 try:
-    from backend.constants import SecurityConfig, ServerConfig, LoggingConfig
+    from backend.constants import SecurityConfig, ServerConfig, LoggingConfig, MetricsConfig, WebSocketConfig
 except ImportError:
-    from constants import SecurityConfig, ServerConfig, LoggingConfig
+    from constants import SecurityConfig, ServerConfig, LoggingConfig, MetricsConfig, WebSocketConfig
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -27,11 +27,12 @@ from utils.security import secure_filename
 from services.config_service import ConfigService
 from services.workspace_service import WorkspaceService
 from core.task_manager import task_hub
-from utils.logger import configure_logger, get_logger
-from core.health import get_health_status, HealthStatus
-from core.metrics import get_metrics, get_metrics_json, registry
-
-logger = get_logger()
+from utils.logger import core_logger, api_logger, task_logger, db_logger, key_logger, get_logger
+from utils.metrics import metrics, MetricsMiddleware
+from utils.health import health_checker
+from utils.cache import init_cache, get_cache
+from utils.websocket import ws_manager, progress_tracker, EventType
+from core.priority_queue import priority_task_hub, TaskPriority
 
 class AppState:
     def __init__(self):
@@ -41,6 +42,8 @@ class AppState:
         self.use_multi_key = False
         self.ocr_multi_key = False
         self.llm_multi_key = False
+        self.task_hub = task_hub
+        self.start_time = time.time()
 
     def initialize(self, path: str):
         if not os.path.exists(path):
@@ -53,6 +56,16 @@ class AppState:
         self.ocr_multi_key = pool_status.get("ocr", False)
         self.llm_multi_key = pool_status.get("llm", False)
         self.use_multi_key = self.ocr_multi_key or self.llm_multi_key
+
+        init_cache()
+
+        metrics.set_app_info(
+            version="1.0.0",
+            workspace=path,
+            multi_key_enabled=str(self.use_multi_key)
+        )
+
+        core_logger.info(f"Application initialized", workspace=path, multi_key=self.use_multi_key)
         print(f"[Core] Active workspace: {path}")
         print(f"[Core] OCR multi-key: {'enabled' if self.ocr_multi_key else 'disabled'}")
         print(f"[Core] LLM multi-key: {'enabled' if self.llm_multi_key else 'disabled'}")
@@ -61,37 +74,21 @@ state = AppState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    configure_logger(
-        log_level=LoggingConfig.DEFAULT_LEVEL,
-        log_dir=os.path.join(BASE_DIR, "..", LoggingConfig.LOG_DIR),
-        log_file=LoggingConfig.LOG_FILE,
-        max_bytes=LoggingConfig.MAX_BYTES,
-        backup_count=LoggingConfig.BACKUP_COUNT,
-        console_output=True,
-        json_format=LoggingConfig.JSON_FORMAT
-    )
-
-    logger.info("Academic Clarity Backend starting up", event="startup")
-
     initial_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(BASE_DIR), "workspace_default")
     state.initialize(initial_path)
 
     await task_hub.start_workers(state)
 
-    logger.info(
-        "System initialized successfully",
-        event="init_complete",
-        workspace=state.workspace_path,
-        ocr_multi_key=state.ocr_multi_key,
-        llm_multi_key=state.llm_multi_key
-    )
+    core_logger.info("Application startup complete", uptime_start=state.start_time)
 
     yield
 
-    logger.info("Academic Clarity Backend shutting down", event="shutdown")
-    await task_hub.stop()
+    await task_hub.shutdown()
+    core_logger.info("Application shutdown complete")
 
 app = FastAPI(title="Academic Clarity Backend", lifespan=lifespan)
+
+app.middleware("http")(MetricsMiddleware(lambda scope, receive, send: None))
 
 app.add_middleware(
     CORSMiddleware,
@@ -102,8 +99,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket端点 - 支持实时任务进度推送"""
+    await websocket.accept()
+    client_id = websocket.client
+
+    try:
+        await ws_manager.connect(websocket)
+        api_logger.info(f"WebSocket client connected", client=str(client_id))
+
+        while True:
+            try:
+                data = await websocket.receive_text()
+                message = ws_manager.WSMessage.from_json(data)
+
+                if message.event == EventType.HEARTBEAT:
+                    await ws_manager.send(websocket, EventType.HEARTBEAT, {"pong": True})
+
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                api_logger.error(f"WebSocket error", error=str(e), client=str(client_id))
+                break
+
+    finally:
+        await ws_manager.disconnect(websocket)
+        api_logger.info(f"WebSocket client disconnected", client=str(client_id))
+
 @app.get("/files/{filename}")
 async def serve_file(filename: str):
+    api_logger.debug(f"Serving file", filename=filename)
     decoded_filename = urllib.parse.unquote(filename)
 
     if '..' in decoded_filename or decoded_filename.startswith('/') or decoded_filename.startswith('\\'):
@@ -139,74 +165,37 @@ class MetadataRequest(BaseModel):
     label: str
     prompt: str
 
+class PriorityRequest(BaseModel):
+    doc_id: int
+    priority: str = "normal"
+
 @app.get("/health")
 async def health():
-    health_data = get_health_status()
-    status_code = 200 if health_data["status"] != HealthStatus.UNHEALTHY.value else 503
-    return health_data
+    """基础健康检查"""
+    return {"status": "ok", "workspace": state.workspace_path}
 
-@app.get("/health/live")
-async def liveness():
-    return {"status": "alive"}
-
-@app.get("/health/ready")
-async def readiness():
-    health_data = get_health_status()
-    if health_data["status"] == HealthStatus.UNHEALTHY.value:
-        raise HTTPException(status_code=503, detail=health_data)
-    return health_data
+@app.get("/health/detailed")
+async def detailed_health():
+    """详细健康检查 - 检查所有组件"""
+    result = await health_checker.run_all_checks(state)
+    status_code = 200 if result["status"] == "healthy" else 503 if result["status"] == "unhealthy" else 200
+    return JSONResponse(content=result, status_code=status_code)
 
 @app.get("/metrics")
-async def metrics():
-    task_stats = task_hub.get_stats()
-    key_stats = key_manager.get_all_stats()
-    registry.update_from_stats(task_stats, key_stats)
-    return Response(content=get_metrics(), media_type="text/plain; charset=utf-8")
+async def prometheus_metrics():
+    """Prometheus指标端点"""
+    return metrics.get_prometheus_metrics()
 
-@app.get("/metrics/json")
-async def metrics_json():
-    task_stats = task_hub.get_stats()
-    key_stats = key_manager.get_all_stats()
-    registry.update_from_stats(task_stats, key_stats)
-    return get_metrics_json()
-
-@app.get("/cache/stats")
-async def cache_stats():
-    from core.cache import get_cache
-    return get_cache().get_stats()
-
-@app.post("/cache/clear")
-async def clear_cache():
-    from core.cache import get_cache
-    result = get_cache().cleanup()
-    get_cache().clear()
-    return {"success": True, **result}
-
-@app.get("/events/stats")
-async def events_stats():
-    from core.websocket import get_event_bus
-    return get_event_bus().get_stats()
-
-@app.get("/events/history")
-async def events_history(event_type: str = None, limit: int = 50):
-    from core.websocket import get_event_bus, EventType
-    et = EventType(event_type) if event_type else None
-    return get_event_bus().get_history(et, limit)
-
-@app.get("/priority/stats")
-async def priority_stats():
-    from core.priority_queue import get_priority_queue
-    return get_priority_queue().get_stats()
-
-@app.get("/scheduler/stats")
-async def scheduler_stats():
-    from microservices.distributed_scheduler import get_scheduler
-    return get_scheduler().get_stats()
-
-@app.get("/scheduler/nodes")
-async def scheduler_nodes():
-    from microservices.distributed_scheduler import get_scheduler
-    return get_scheduler().get_node_status()
+@app.get("/metrics/summary")
+async def metrics_summary():
+    """指标摘要"""
+    return {
+        "uptime_seconds": metrics.get_uptime(),
+        "tasks_in_progress": state.task_hub.get_stats().get("active_tasks", 0),
+        "tasks_queued": state.task_hub.get_stats().get("queued_tasks", 0),
+        "websocket_connections": ws_manager.get_connection_count(),
+        "cache_stats": get_cache().cache.get_stats() if hasattr(get_cache(), 'cache') else {}
+    }
 
 @app.get("/tasks")
 async def list_active_tasks():
@@ -216,7 +205,27 @@ async def list_active_tasks():
 
 @app.get("/tasks/stats")
 async def get_task_stats():
-    return task_hub.get_stats()
+    return {
+        "standard": state.task_hub.get_stats(),
+        "priority": priority_task_hub.get_stats() if priority_task_hub else {}
+    }
+
+@app.get("/tasks/dead-letters")
+async def get_dead_letters():
+    """获取死信队列"""
+    if priority_task_hub:
+        return priority_task_hub.queue.get_dead_letters()
+    return {}
+
+@app.post("/tasks/dead-letters/{task_id}/retry")
+async def retry_dead_letter(task_id: str):
+    """重试死信任务"""
+    if priority_task_hub:
+        task = priority_task_hub.queue.retry_dead_letter(task_id)
+        if task:
+            await priority_task_hub.queue.enqueue(task)
+            return {"success": True, "message": f"Task {task_id} requeued"}
+    return {"success": False, "message": "Task not found"}
 
 @app.post("/workspace/sync")
 async def sync_workspace():
@@ -233,6 +242,7 @@ async def sync_workspace():
             stored_path = d.get('stored_path')
             if stored_path and os.path.exists(stored_path):
                 await task_hub.add_task(d['id'], run_full_ocr_workflow, stored_path)
+                await ws_manager.send_document_update("updated", d['id'])
                 triggered += 1
 
     return {"success": True, "triggered": triggered}
@@ -252,7 +262,23 @@ async def get_configs():
 @app.get("/configs/multi-keys")
 async def get_multi_key_stats():
     from core.api_key_manager import key_manager
-    return key_manager.get_all_stats()
+    stats = key_manager.get_all_stats()
+
+    for service, service_stats in stats.items():
+        if "keys" in service_stats:
+            for key_stats in service_stats["keys"]:
+                key_prefix = key_stats.get("api_key", "")[:8]
+                metrics.update_key_stats(
+                    service=service,
+                    key_prefix=key_prefix,
+                    rpm_used=key_stats.get("rpm_used", 0),
+                    rpm_limit=key_stats.get("rpm_limit", 60),
+                    tpm_used=key_stats.get("tpm_used", 0),
+                    tpm_limit=key_stats.get("tpm_limit", 100000),
+                    is_healthy=key_stats.get("is_healthy", True)
+                )
+
+    return stats
 
 @app.post("/configs/multi-keys/ocr")
 async def update_ocr_keys(ocr_keys: str = Query(...)):
@@ -261,6 +287,7 @@ async def update_ocr_keys(ocr_keys: str = Query(...)):
     pool_status = config_service.initialize_key_pools()
     state.ocr_multi_key = pool_status.get("ocr", False)
     state.use_multi_key = state.ocr_multi_key or state.llm_multi_key
+    key_logger.log_key_pool("updated", "ocr")
     return {
         "success": True,
         "ocr_multi_key": state.ocr_multi_key,
@@ -274,6 +301,7 @@ async def update_llm_keys(llm_keys: str = Query(...)):
     pool_status = config_service.initialize_key_pools()
     state.llm_multi_key = pool_status.get("llm", False)
     state.use_multi_key = state.ocr_multi_key or state.llm_multi_key
+    key_logger.log_key_pool("updated", "llm")
     return {
         "success": True,
         "llm_multi_key": state.llm_multi_key,
@@ -304,6 +332,11 @@ async def add_document(file: UploadFile = File(...)):
 
     doc_id = state.db.add_document(filename, "uploaded", dest_path)
     await task_hub.add_task(doc_id, run_full_ocr_workflow, dest_path)
+
+    doc = state.db.get_document(doc_id)
+    await ws_manager.send_document_update("added", doc_id, doc)
+
+    api_logger.log_api_call("/documents/add", "POST", 201, 0)
     return {"success": True, "doc_id": doc_id}
 
 @app.get("/documents/{doc_id}/pdf")
@@ -321,6 +354,7 @@ async def delete_document(doc_id: int):
             try: os.remove(doc['stored_path'])
             except: pass
         state.db.delete_document(doc_id)
+        await ws_manager.send_document_update("deleted", doc_id)
         return {"success": True}
     return {"success": False}
 
@@ -348,11 +382,28 @@ async def trigger_custom_extraction(doc_id: int, request: MetadataRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/documents/{doc_id}/reprocess")
-async def reprocess_document(doc_id: int):
+async def reprocess_document(doc_id: int, priority: str = "normal"):
     doc = state.db.get_document(doc_id)
     if not doc:
         raise HTTPException(status_code=404)
-    await task_hub.add_task(doc_id, run_full_ocr_workflow, doc['stored_path'], force=True)
+
+    priority_map = {
+        "critical": TaskPriority.CRITICAL,
+        "high": TaskPriority.HIGH,
+        "normal": TaskPriority.NORMAL,
+        "low": TaskPriority.LOW
+    }
+
+    task_priority = priority_map.get(priority.lower(), TaskPriority.NORMAL)
+
+    if priority_task_hub and task_priority.value < TaskPriority.NORMAL.value:
+        await priority_task_hub.add_task(doc_id, run_full_ocr_workflow, doc['stored_path'],
+                                         priority=task_priority, force=True)
+        task_logger.log_task("queued_priority", doc_id, priority=task_priority.name)
+    else:
+        await task_hub.add_task(doc_id, run_full_ocr_workflow, doc['stored_path'], force=True)
+        task_logger.log_task("queued", doc_id)
+
     return {"success": True}
 
 @app.post("/chat")

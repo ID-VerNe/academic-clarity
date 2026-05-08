@@ -1,269 +1,173 @@
 """
-Academic Clarity - Structured Logging Module
-提供统一的结构化日志记录，支持日志级别、上下文追踪、文件轮转
+Academic Clarity - 统一日志系统
+提供结构化日志、多个日志级别、按模块分类输出
 """
-
 import os
 import sys
+import logging
 import json
 import time
-import traceback
-import logging
-from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from typing import Any, Dict, Optional, Union
-from enum import IntEnum
-from threading import Lock
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
+from typing import Optional, Dict, Any
+from pathlib import Path
 
-class LogLevel(IntEnum):
-    DEBUG = 10
-    INFO = 20
-    WARNING = 30
-    ERROR = 40
-    CRITICAL = 50
+try:
+    from backend.constants import ServerConfig
+except ImportError:
+    from constants import ServerConfig
 
-class StructuredLogger:
-    _instance = None
-    _init_lock = Lock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._init_lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
-
+class JSONFormatter(logging.Formatter):
+    """JSON格式日志格式化器"""
     def __init__(self):
-        if self._initialized:
-            return
-        self._initialized = True
+        super().__init__()
 
-        self._log_level = LogLevel.INFO
-        self._log_dir = None
-        self._log_file = None
-        self._console_output = True
-        self._json_format = True
-        self._context: Dict[str, Any] = {}
-        self._context_lock = Lock()
-        self._logger: Optional[logging.Logger] = None
-        self._file_handler: Optional[RotatingFileHandler] = None
-
-    def configure(
-        self,
-        log_level: Union[str, int, LogLevel] = "INFO",
-        log_dir: str = None,
-        log_file: str = "academic_clarity.log",
-        max_bytes: int = 10 * 1024 * 1024,
-        backup_count: int = 5,
-        console_output: bool = True,
-        json_format: bool = True
-    ):
-        if isinstance(log_level, str):
-            self._log_level = LogLevel[log_level.upper()]
-        elif isinstance(log_level, int):
-            self._log_level = LogLevel(log_level)
-        else:
-            self._log_level = log_level
-
-        self._log_dir = log_dir
-        self._log_file = log_file
-        self._console_output = console_output
-        self._json_format = json_format
-
-        if log_dir:
-            os.makedirs(log_dir, exist_ok=True)
-            log_path = os.path.join(log_dir, log_file)
-            self._logger = logging.getLogger("AcademicClarity")
-            self._logger.setLevel(self._log_level)
-            self._logger.handlers.clear()
-
-            file_handler = RotatingFileHandler(
-                log_path,
-                maxBytes=max_bytes,
-                backupCount=backup_count,
-                encoding='utf-8'
-            )
-            file_handler.setLevel(self._log_level)
-            if json_format:
-                file_handler.setFormatter(logging.Formatter('%(message)s'))
-            else:
-                file_handler.setFormatter(
-                    logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-                )
-            self._logger.addHandler(file_handler)
-            self._file_handler = file_handler
-
-    def set_context(self, **kwargs):
-        with self._context_lock:
-            self._context.update(kwargs)
-
-    def clear_context(self):
-        with self._context_lock:
-            self._context.clear()
-
-    def _build_record(self, level: LogLevel, message: str, **kwargs) -> Dict[str, Any]:
-        record = {
+    def format(self, record: logging.LogRecord) -> str:
+        log_data = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
-            "level": level.name,
-            "message": message,
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno,
         }
 
-        with self._context_lock:
-            record["context"] = dict(self._context)
+        if record.exc_info:
+            log_data["exception"] = self.formatException(record.exc_info)
 
-        if kwargs:
-            record["extra"] = kwargs
+        if hasattr(record, "extra"):
+            log_data["extra"] = record.extra
 
-        return record
+        return json.dumps(log_data)
 
-    def _log(self, level: LogLevel, message: str, **kwargs):
-        if level < self._log_level:
-            return
+class ColoredFormatter(logging.Formatter):
+    """带颜色的控制台格式化器"""
+    COLORS = {
+        "DEBUG": "\033[36m",
+        "INFO": "\033[32m",
+        "WARNING": "\033[33m",
+        "ERROR": "\033[31m",
+        "CRITICAL": "\033[35m",
+    }
+    RESET = "\033[0m"
 
-        record = self._build_record(level, message, **kwargs)
+    def format(self, record: logging.LogRecord) -> str:
+        color = self.COLORS.get(record.levelname, self.RESET)
+        record.levelname = f"{color}{record.levelname}{self.RESET}"
+        return f"[{self.formatTime(record)}] [{record.levelname}] [{record.name}] {record.getMessage()}"
 
-        if self._json_format:
-            log_line = json.dumps(record, ensure_ascii=False, default=str)
-        else:
-            extra_info = " ".join(f"{k}={v}" for k, v in kwargs.items())
-            context_info = " ".join(f"{k}={v}" for k, v in record["context"].items())
-            log_line = f"{record['timestamp']} [{level.name}] {message}"
-            if context_info:
-                log_line += f" | {context_info}"
-            if extra_info:
-                log_line += f" | {extra_info}"
+class StructuredLogger:
+    """结构化日志记录器"""
+    _instances: Dict[str, logging.Logger] = {}
 
-        if self._console_output:
-            print(log_line, file=sys.stdout if level <= LogLevel.WARNING else sys.stderr)
+    def __init__(self, name: str, log_dir: Optional[str] = None):
+        self.name = name
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.handlers.clear()
 
-        if self._logger:
-            if level == LogLevel.DEBUG:
-                self._logger.debug(log_line)
-            elif level == LogLevel.INFO:
-                self._logger.info(log_line)
-            elif level == LogLevel.WARNING:
-                self._logger.warning(log_line)
-            elif level == LogLevel.ERROR:
-                self._logger.error(log_line)
-            elif level == LogLevel.CRITICAL:
-                self._logger.critical(log_line)
+        if log_dir:
+            self._setup_file_handler(log_dir)
+        self._setup_console_handler()
 
-    def debug(self, message: str, **kwargs):
-        self._log(LogLevel.DEBUG, message, **kwargs)
+    def _setup_console_handler(self):
+        """设置控制台处理器"""
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(ColoredFormatter())
+        self.logger.addHandler(console_handler)
 
-    def info(self, message: str, **kwargs):
-        self._log(LogLevel.INFO, message, **kwargs)
+    def _setup_file_handler(self, log_dir: str):
+        """设置文件处理器"""
+        log_path = Path(log_dir)
+        log_path.mkdir(parents=True, exist_ok=True)
 
-    def warning(self, message: str, **kwargs):
-        self._log(LogLevel.WARNING, message, **kwargs)
+        file_handler = RotatingFileHandler(
+            log_path / f"{self.name}.log",
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8"
+        )
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(JSONFormatter())
+        self.logger.addHandler(file_handler)
 
-    def error(self, message: str, **kwargs):
-        self._log(LogLevel.ERROR, message, **kwargs)
+        error_handler = RotatingFileHandler(
+            log_path / f"{self.name}_error.log",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8"
+        )
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(JSONFormatter())
+        self.logger.addHandler(error_handler)
 
-    def critical(self, message: str, **kwargs):
-        self._log(LogLevel.CRITICAL, message, **kwargs)
+    def debug(self, msg: str, **kwargs):
+        self.logger.debug(msg, extra=kwargs if kwargs else None)
 
-    def exception(self, message: str, exc: Exception = None, **kwargs):
-        exc_info = ""
-        if exc:
-            exc_info = f" {type(exc).__name__}: {str(exc)}"
-        elif sys.exc_info()[0]:
-            exc_info = f" {traceback.format_exc()}"
-        self._log(LogLevel.ERROR, message + exc_info, **kwargs)
+    def info(self, msg: str, **kwargs):
+        self.logger.info(msg, extra=kwargs if kwargs else None)
 
-    def log_api_call(
-        self,
-        endpoint: str,
-        method: str = "GET",
-        status_code: int = None,
-        duration_ms: float = None,
-        error: str = None,
-        **kwargs
-    ):
+    def warning(self, msg: str, **kwargs):
+        self.logger.warning(msg, extra=kwargs if kwargs else None)
+
+    def error(self, msg: str, **kwargs):
+        self.logger.error(msg, extra=kwargs if kwargs else None)
+
+    def critical(self, msg: str, **kwargs):
+        self.logger.critical(msg, extra=kwargs if kwargs else None)
+
+    def log_api_call(self, endpoint: str, method: str, status_code: int, duration_ms: float):
+        """记录API调用"""
         self.info(
-            f"API {method} {endpoint}",
+            f"API {method} {endpoint} -> {status_code}",
             event="api_call",
-            method=method,
             endpoint=endpoint,
+            method=method,
             status_code=status_code,
-            duration_ms=round(duration_ms, 2) if duration_ms else None,
-            error=error,
-            **kwargs
+            duration_ms=duration_ms
         )
 
-    def log_task(
-        self,
-        task_id: int,
-        action: str,
-        status: str = None,
-        duration_ms: float = None,
-        error: str = None,
-        **kwargs
-    ):
-        level = LogLevel.ERROR if error else LogLevel.INFO
-        self._log(
-            level,
-            f"Task {task_id} {action}",
-            event="task",
-            task_id=task_id,
-            action=action,
-            status=status,
-            duration_ms=round(duration_ms, 2) if duration_ms else None,
-            error=error,
-            **kwargs
-        )
+    def log_task(self, action: str, doc_id: int, worker_id: Optional[int] = None, **kwargs):
+        """记录任务相关事件"""
+        extra = {"event": "task", "doc_id": doc_id, "action": action}
+        if worker_id is not None:
+            extra["worker_id"] = worker_id
+        extra.update(kwargs)
 
-    def log_key_pool(
-        self,
-        pool_name: str,
-        action: str,
-        key_id: str = None,
-        available: int = None,
-        total: int = None,
-        error: str = None,
-        **kwargs
-    ):
-        level = LogLevel.ERROR if error else LogLevel.DEBUG
-        self._log(
-            level,
-            f"KeyPool {pool_name}: {action}",
-            event="key_pool",
-            pool_name=pool_name,
-            action=action,
-            key_id=key_id[:8] + "..." if key_id else None,
-            available=available,
-            total=total,
-            error=error,
-            **kwargs
-        )
+        if action in ["started", "completed"]:
+            self.info(f"Task {action} for Doc {doc_id}", **extra)
+        else:
+            self.warning(f"Task {action} for Doc {doc_id}", **extra)
 
-    def log_db_operation(
-        self,
-        operation: str,
-        table: str = None,
-        rows_affected: int = None,
-        duration_ms: float = None,
-        error: str = None,
-        **kwargs
-    ):
-        level = LogLevel.ERROR if error else LogLevel.DEBUG
-        self._log(
-            level,
-            f"DB {operation}",
-            event="database",
-            operation=operation,
-            table=table,
-            rows_affected=rows_affected,
-            duration_ms=round(duration_ms, 2) if duration_ms else None,
-            error=error,
-            **kwargs
-        )
+    def log_key_pool(self, action: str, service: str, key_prefix: str = "", **kwargs):
+        """记录密钥池操作"""
+        extra = {"event": "key_pool", "service": service, "action": action}
+        if key_prefix:
+            extra["key"] = f"{key_prefix}..."
+        extra.update(kwargs)
+        self.info(f"KeyPool [{service}] {action}", **extra)
 
-logger = StructuredLogger()
+    def log_database(self, operation: str, duration_ms: float, rows_affected: int = 0, **kwargs):
+        """记录数据库操作"""
+        extra = {
+            "event": "database",
+            "operation": operation,
+            "duration_ms": duration_ms,
+            "rows_affected": rows_affected
+        }
+        extra.update(kwargs)
+        self.debug(f"DB {operation} ({duration_ms:.2f}ms, {rows_affected} rows)", **extra)
 
-def get_logger() -> StructuredLogger:
-    return logger
+def get_logger(name: str, log_dir: Optional[str] = None) -> StructuredLogger:
+    """获取或创建日志记录器"""
+    if name not in StructuredLogger._instances:
+        StructuredLogger._instances[name] = StructuredLogger(name, log_dir)
+    return StructuredLogger._instances[name]
 
-def configure_logger(**kwargs):
-    logger.configure(**kwargs)
+core_logger = get_logger("academic_clarity")
+api_logger = get_logger("api")
+task_logger = get_logger("task")
+db_logger = get_logger("database")
+key_logger = get_logger("keypool")

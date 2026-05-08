@@ -4,24 +4,6 @@ Academic Clarity - System Constants and Defaults
 注意：此文件为代码常量模块，不存储用户配置
 """
 
-# ==== Logging Config ====
-class LoggingConfig:
-    DEFAULT_LEVEL = "INFO"
-    LOG_DIR = "logs"
-    LOG_FILE = "academic_clarity.log"
-    MAX_BYTES = 10 * 1024 * 1024
-    BACKUP_COUNT = 5
-    JSON_FORMAT = True
-
-# ==== Cache Config ====
-class CacheConfig:
-    DEFAULT_TTL = 3600
-    DOCUMENT_TTL = 7200
-    OCR_RESULT_TTL = 86400
-    SESSION_TTL = 3600
-    MAX_SIZE = 1000
-    REDIS_URL = "redis://localhost:6379/0"
-
 # ==== OCR Service ====
 class OCRConfig:
     MAX_RETRIES = 3
@@ -76,3 +58,42 @@ class DBConfig:
 class ServerConfig:
     DEFAULT_PORT = 38391
     MAX_PORT_RANGE = 5
+
+# ==== Logging ====
+class LoggingConfig:
+    LOG_DIR = "logs"
+    MAX_LOG_SIZE = 10 * 1024 * 1024
+    BACKUP_COUNT = 5
+    JSON_FORMAT = True
+    LOG_LEVEL = "INFO"
+
+# ==== Metrics (Prometheus) ====
+class MetricsConfig:
+    ENABLED = True
+    EXPORT_INTERVAL = 60
+    RETENTION_HOURS = 24
+
+# ==== Cache ====
+class CacheConfig:
+    ENABLED = False
+    REDIS_HOST = "localhost"
+    REDIS_PORT = 6379
+    DEFAULT_TTL = 300
+    DOCUMENT_TTL = 600
+    KEYPOOL_TTL = 30
+    MAX_IN_MEMORY_SIZE = 1000
+
+# ==== WebSocket ====
+class WebSocketConfig:
+    ENABLED = True
+    HEARTBEAT_INTERVAL = 30
+    MAX_CONNECTIONS = 100
+    MESSAGE_QUEUE_SIZE = 1000
+
+# ==== Priority Queue ====
+class PriorityConfig:
+    DEFAULT_PRIORITY = 2
+    CRITICAL_RETRY_INTERVAL = 0.5
+    HIGH_RETRY_INTERVAL = 1.0
+    NORMAL_RETRY_INTERVAL = 5.0
+    DEAD_LETTER_RETENTION_HOURS = 24
