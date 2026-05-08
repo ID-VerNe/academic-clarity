@@ -4,6 +4,24 @@ Academic Clarity - System Constants and Defaults
 注意：此文件为代码常量模块，不存储用户配置
 """
 
+# ==== Logging Config ====
+class LoggingConfig:
+    DEFAULT_LEVEL = "INFO"
+    LOG_DIR = "logs"
+    LOG_FILE = "academic_clarity.log"
+    MAX_BYTES = 10 * 1024 * 1024
+    BACKUP_COUNT = 5
+    JSON_FORMAT = True
+
+# ==== Cache Config ====
+class CacheConfig:
+    DEFAULT_TTL = 3600
+    DOCUMENT_TTL = 7200
+    OCR_RESULT_TTL = 86400
+    SESSION_TTL = 3600
+    MAX_SIZE = 1000
+    REDIS_URL = "redis://localhost:6379/0"
+
 # ==== OCR Service ====
 class OCRConfig:
     MAX_RETRIES = 3

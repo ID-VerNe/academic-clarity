@@ -2,19 +2,20 @@ import os
 import sys
 import shutil
 import urllib.parse
+import time
 import uvicorn
 import asyncio
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 try:
-    from backend.constants import SecurityConfig, ServerConfig
+    from backend.constants import SecurityConfig, ServerConfig, LoggingConfig
 except ImportError:
-    from constants import SecurityConfig, ServerConfig
+    from constants import SecurityConfig, ServerConfig, LoggingConfig
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -26,6 +27,11 @@ from utils.security import secure_filename
 from services.config_service import ConfigService
 from services.workspace_service import WorkspaceService
 from core.task_manager import task_hub
+from utils.logger import configure_logger, get_logger
+from core.health import get_health_status, HealthStatus
+from core.metrics import get_metrics, get_metrics_json, registry
+
+logger = get_logger()
 
 class AppState:
     def __init__(self):
@@ -55,12 +61,35 @@ state = AppState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logger(
+        log_level=LoggingConfig.DEFAULT_LEVEL,
+        log_dir=os.path.join(BASE_DIR, "..", LoggingConfig.LOG_DIR),
+        log_file=LoggingConfig.LOG_FILE,
+        max_bytes=LoggingConfig.MAX_BYTES,
+        backup_count=LoggingConfig.BACKUP_COUNT,
+        console_output=True,
+        json_format=LoggingConfig.JSON_FORMAT
+    )
+
+    logger.info("Academic Clarity Backend starting up", event="startup")
+
     initial_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(BASE_DIR), "workspace_default")
     state.initialize(initial_path)
 
     await task_hub.start_workers(state)
 
+    logger.info(
+        "System initialized successfully",
+        event="init_complete",
+        workspace=state.workspace_path,
+        ocr_multi_key=state.ocr_multi_key,
+        llm_multi_key=state.llm_multi_key
+    )
+
     yield
+
+    logger.info("Academic Clarity Backend shutting down", event="shutdown")
+    await task_hub.stop()
 
 app = FastAPI(title="Academic Clarity Backend", lifespan=lifespan)
 
@@ -112,7 +141,72 @@ class MetadataRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "workspace": state.workspace_path}
+    health_data = get_health_status()
+    status_code = 200 if health_data["status"] != HealthStatus.UNHEALTHY.value else 503
+    return health_data
+
+@app.get("/health/live")
+async def liveness():
+    return {"status": "alive"}
+
+@app.get("/health/ready")
+async def readiness():
+    health_data = get_health_status()
+    if health_data["status"] == HealthStatus.UNHEALTHY.value:
+        raise HTTPException(status_code=503, detail=health_data)
+    return health_data
+
+@app.get("/metrics")
+async def metrics():
+    task_stats = task_hub.get_stats()
+    key_stats = key_manager.get_all_stats()
+    registry.update_from_stats(task_stats, key_stats)
+    return Response(content=get_metrics(), media_type="text/plain; charset=utf-8")
+
+@app.get("/metrics/json")
+async def metrics_json():
+    task_stats = task_hub.get_stats()
+    key_stats = key_manager.get_all_stats()
+    registry.update_from_stats(task_stats, key_stats)
+    return get_metrics_json()
+
+@app.get("/cache/stats")
+async def cache_stats():
+    from core.cache import get_cache
+    return get_cache().get_stats()
+
+@app.post("/cache/clear")
+async def clear_cache():
+    from core.cache import get_cache
+    result = get_cache().cleanup()
+    get_cache().clear()
+    return {"success": True, **result}
+
+@app.get("/events/stats")
+async def events_stats():
+    from core.websocket import get_event_bus
+    return get_event_bus().get_stats()
+
+@app.get("/events/history")
+async def events_history(event_type: str = None, limit: int = 50):
+    from core.websocket import get_event_bus, EventType
+    et = EventType(event_type) if event_type else None
+    return get_event_bus().get_history(et, limit)
+
+@app.get("/priority/stats")
+async def priority_stats():
+    from core.priority_queue import get_priority_queue
+    return get_priority_queue().get_stats()
+
+@app.get("/scheduler/stats")
+async def scheduler_stats():
+    from microservices.distributed_scheduler import get_scheduler
+    return get_scheduler().get_stats()
+
+@app.get("/scheduler/nodes")
+async def scheduler_nodes():
+    from microservices.distributed_scheduler import get_scheduler
+    return get_scheduler().get_node_status()
 
 @app.get("/tasks")
 async def list_active_tasks():

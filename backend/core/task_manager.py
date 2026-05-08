@@ -9,6 +9,11 @@ try:
 except ImportError:
     from constants import TaskConfig
 
+try:
+    from backend.utils.logger import get_logger
+except ImportError:
+    from utils.logger import get_logger
+
 class TaskManager:
     def __init__(self, concurrency=None):
         if concurrency is None:
@@ -21,11 +26,18 @@ class TaskManager:
         self._app_state = None
         self._cleanup_task = None
         self._last_cleanup = time.time()
+        self._running = False
+        self._logger = get_logger()
 
     async def start_workers(self, app_state):
         """启动指定数量的并行 Worker"""
         self._app_state = app_state
-        print(f"[TaskHub] Launching {self.concurrency} parallel workers...")
+        self._running = True
+        self._logger.info(
+            "Starting TaskHub workers",
+            event="taskhub_start",
+            concurrency=self.concurrency
+        )
         for i in range(self.concurrency):
             worker = asyncio.create_task(self._worker_loop(i, app_state))
             self.workers.append(worker)
@@ -45,7 +57,11 @@ class TaskManager:
         for doc_id, _ in sorted_tasks[:to_remove]:
             self.failed_task_ids.pop(doc_id, None)
 
-        print(f"[TaskHub] Cleaned up {to_remove} old failed task records")
+        self._logger.info(
+            f"Cleaned up {to_remove} old failed task records",
+            event="cleanup",
+            removed_count=to_remove
+        )
 
     async def _cleanup_loop(self):
         """定期清理失败的记录"""
@@ -60,26 +76,52 @@ class TaskManager:
             force: 如果为 True，即使任务超过最大重试次数也强制重新入队
         """
         if doc_id in self.active_task_ids:
-            print(f"[TaskHub] Doc {doc_id} already in queue, skipping")
+            self._logger.debug(
+                f"Doc {doc_id} already in queue, skipping",
+                event="task_skip",
+                reason="already_active",
+                doc_id=doc_id
+            )
             return
 
         if not force and doc_id in self.failed_task_ids:
             fail_count, last_fail = self.failed_task_ids[doc_id]
             if fail_count >= TaskConfig.MAX_RETRIES:
-                print(f"[TaskHub] Doc {doc_id} exceeded max retries ({fail_count}), skipping. Use force=True to requeue.")
+                self._logger.info(
+                    f"Doc {doc_id} exceeded max retries",
+                    event="task_skip",
+                    reason="max_retries_exceeded",
+                    doc_id=doc_id,
+                    fail_count=fail_count
+                )
                 return
 
         if force and doc_id in self.failed_task_ids:
-            print(f"[TaskHub] Doc {doc_id} forcing requeue, clearing failed record")
+            self._logger.info(
+                f"Doc {doc_id} forcing requeue, clearing failed record",
+                event="task_force_requeue",
+                doc_id=doc_id
+            )
             self.failed_task_ids.pop(doc_id, None)
 
         self.active_task_ids.add(doc_id)
         await self.queue.put((doc_id, task_func, args, 0))
+        self._logger.debug(
+            f"Task queued for Doc {doc_id}",
+            event="task_queued",
+            doc_id=doc_id
+        )
 
     async def _schedule_retry(self, doc_id, task_func, args, retries):
         """非阻塞方式调度重试，避免阻塞 worker"""
         backoff = TaskConfig.RETRY_BACKOFF[retries] if retries < len(TaskConfig.RETRY_BACKOFF) else TaskConfig.RETRY_BACKOFF[-1]
-        print(f"[TaskHub] Scheduling retry {retries}/{TaskConfig.MAX_RETRIES} for Doc {doc_id} in {backoff}s (non-blocking)")
+        self._logger.info(
+            f"Scheduling retry for Doc {doc_id}",
+            event="retry_scheduled",
+            doc_id=doc_id,
+            retry_count=retries,
+            backoff_seconds=backoff
+        )
         await asyncio.sleep(backoff)
         self.failed_task_ids[doc_id] = (retries, time.time())
         self._cleanup_old_failures()
@@ -87,17 +129,41 @@ class TaskManager:
 
     async def _worker_loop(self, worker_id, app_state):
         """Worker 循环认领任务"""
-        while True:
+        while self._running:
             doc_id, task_func, args, retries = await self.queue.get()
-            print(f"[Worker-{worker_id}] Claimed task for Doc ID: {doc_id}")
+            start_time = time.time()
+
+            self._logger.info(
+                f"Worker {worker_id} processing Doc {doc_id}",
+                event="task_start",
+                worker_id=worker_id,
+                doc_id=doc_id,
+                retry_count=retries
+            )
 
             try:
                 await task_func(doc_id, *args, db=app_state.db)
                 self.active_task_ids.discard(doc_id)
                 self.failed_task_ids.pop(doc_id, None)
-                print(f"[Worker-{worker_id}] Task SUCCESS for Doc: {doc_id}")
+                duration = time.time() - start_time
+                self._logger.info(
+                    f"Task SUCCESS for Doc {doc_id}",
+                    event="task_complete",
+                    worker_id=worker_id,
+                    doc_id=doc_id,
+                    duration_ms=round(duration * 1000, 2),
+                    status="success"
+                )
             except Exception as e:
-                print(f"[Worker-{worker_id}] Task FAILED for Doc: {doc_id}. Error: {e}")
+                duration = time.time() - start_time
+                self._logger.error(
+                    f"Task FAILED for Doc {doc_id}",
+                    event="task_error",
+                    worker_id=worker_id,
+                    doc_id=doc_id,
+                    duration_ms=round(duration * 1000, 2),
+                    error=str(e)
+                )
 
                 if retries < TaskConfig.MAX_RETRIES:
                     asyncio.create_task(self._schedule_retry(doc_id, task_func, args, retries + 1))
@@ -105,7 +171,12 @@ class TaskManager:
                     self.active_task_ids.discard(doc_id)
                     self.failed_task_ids[doc_id] = (retries, time.time())
                     self._cleanup_old_failures()
-                    print(f"[Worker-{worker_id}] Max retries reached for Doc: {doc_id}. Giving up.")
+                    self._logger.warning(
+                        f"Max retries reached for Doc {doc_id}, giving up",
+                        event="task_abandoned",
+                        doc_id=doc_id,
+                        total_retries=retries
+                    )
 
             self.queue.task_done()
 
@@ -121,12 +192,21 @@ class TaskManager:
             ]
         }
 
-    async def shutdown(self):
-        """优雅关闭任务管理器"""
+    async def stop(self):
+        """优雅停止任务管理器"""
+        self._running = False
+        self._logger.info(
+            "Stopping TaskHub workers",
+            event="taskhub_stop"
+        )
         if self._cleanup_task:
             self._cleanup_task.cancel()
         for worker in self.workers:
             worker.cancel()
         await asyncio.gather(*self.workers, return_exceptions=True)
+        self._logger.info(
+            "All TaskHub workers stopped",
+            event="taskhub_stopped"
+        )
 
 task_hub = TaskManager()
