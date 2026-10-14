@@ -9,6 +9,7 @@ from io import BytesIO
 from services.ai_service import call_ocr_api, call_json_extraction_api
 from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown
 from services.config_service import ConfigService
+from services.prompts import BASIC_INSIGHT_PROMPT
 
 try:
     from backend.constants import OCRConfig, MetadataConfig
@@ -160,33 +161,12 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
 
         print(f"[TaskHub] Stage 2: Deep Extraction for {title}")
 
-        default_prompt = """
-        You are a world-class academic metadata curator.
-        Your mission is to extract precise metadata from the provided markdown.
-
-        ### CRITICAL MISSION: DOI EXTRACTION
-        - Look for strings starting with '10.' followed by a prefix and suffix (e.g., 10.1109/TVCG.2023.12345).
-        - The DOI is often located in the very first or last lines of the markdown, or within 'Footnotes' section.
-        - If you find multiple, pick the one that looks like a formal document identifier.
-
-        ### OTHER FIELDS
-        - title: The full academic title.
-        - authors: All authors as a comma-separated string.
-        - journal_or_conference: Full venue name (e.g., IEEE Transactions on...).
-        - date: The year (YYYY) or full publication date.
-        - abstract: A sharp 2-3 sentence summary.
-        - keywords: 5-8 relevant terms.
-        - summary: 3 power-bullets on 'Novelty', 'Method', and 'Impact'.
-
-        Return ONLY a JSON object.
-        """
-
         extract_api_config = config_service.get_extract_config()
         if pool_status.get("llm", False):
             extract_api_config['_use_multi_key'] = True
 
         try:
-            metadata_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, default_prompt)
+            metadata_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, BASIC_INSIGHT_PROMPT)
             db.add_document_metadata(doc_id, MetadataConfig.DEFAULT_LABEL, metadata_json)
         except Exception as e:
             print(f"[TaskHub] Metadata Stage Error: {e}")
