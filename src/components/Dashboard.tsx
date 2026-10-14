@@ -162,6 +162,13 @@ export const Dashboard = ({
             {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
             Import PDF
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            className="hidden"
+            onChange={handleFileChange}
+          />
         </div>
       </div>
 

@@ -84,4 +84,31 @@ describe('Dashboard Filtering', () => {
     expect(screen.getByText('Alpha Research')).toBeDefined();
     expect(screen.getByText('Beta Science')).toBeDefined();
   });
+
+  it('mounts a hidden file input wired to the Import button', () => {
+    // Regression: fileInputRef was declared but never mounted to an
+    // <input type="file">, making the Import button a no-op.
+    const handlers = {
+      onSelectDoc: vi.fn(),
+      onUpload: vi.fn(),
+      onDelete: vi.fn(),
+      onReprocess: vi.fn(),
+      isUploading: false
+    };
+    const { container } = render(<Dashboard docs={mockDocs} {...handlers} />);
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+    expect(fileInput!.accept).toBe('.pdf');
+
+    // Import button click must trigger the hidden input's click
+    const clickSpy = vi.spyOn(fileInput!, 'click');
+    fireEvent.click(screen.getByText('Import PDF'));
+    expect(clickSpy).toHaveBeenCalled();
+
+    // Selecting a file must invoke onUpload with that file
+    const file = new File(['dummy'], 'paper.pdf', { type: 'application/pdf' });
+    fireEvent.change(fileInput!, { target: { files: [file] } });
+    expect(handlers.onUpload).toHaveBeenCalledWith(file);
+  });
 });

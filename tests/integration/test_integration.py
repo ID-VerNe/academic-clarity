@@ -83,7 +83,10 @@ class TestAcademicClarityIntegration(unittest.TestCase):
         
         metadata_list = self.db.get_document_metadata(doc_id)
         self.assertGreater(len(metadata_list), 0)
-        self.assertEqual(metadata_list[0]['label'], "Basic Insight")
+        # OCR Failures 与 Basic Insight 可能在同一秒插入（CURRENT_TIMESTAMP 秒级分辨率），
+        # ORDER BY created_at DESC 次序不定；按 label 集合断言而非首位断言（修片状）。
+        labels = [m['label'] for m in metadata_list]
+        self.assertIn("Basic Insight", labels)
         
         print("  Full Pipeline Logic: PASS")
 

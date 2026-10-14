@@ -55,6 +55,9 @@ tests/ocr_lab/output/
 # Build artifacts
 academic-clarity-source.zip
 
+# Test assets (contains API keys - never commit)
+test/
+
 # Handoff documents
 handoff-*.md
 
