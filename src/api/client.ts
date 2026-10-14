@@ -108,6 +108,18 @@ class ApiClient {
     return res.json();
   }
 
+  async verifyDoi(docId: number) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/documents/${docId}/doi/verify`, { method: 'POST' });
+    return res.json();
+  }
+
+  async getBibtex(docId: number) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/documents/${docId}/bibtex`);
+    return res.json();
+  }
+
   async getPdfUrl(filename: string) {
     const baseUrl = await this.getBaseUrl();
     return `${baseUrl}/files/${encodeURIComponent(filename)}`;

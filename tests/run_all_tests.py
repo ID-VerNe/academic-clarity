@@ -16,7 +16,7 @@ def run_python_test(test_path, python_exe, backend_dir):
         
         proc = subprocess.run(
             [python_exe, test_path],
-            capture_output=True, text=True, encoding='cp437', errors='replace', env=env, timeout=180
+            capture_output=True, text=True, encoding='cp437', errors='replace', env=env, timeout=300
         )
         return {
             "name": f"Py: {os.path.relpath(test_path, os.path.dirname(backend_dir))}", 
@@ -48,7 +48,7 @@ def run_frontend_tests(root_dir):
 
 def cleanup_temp_files(tests_root):
     """递归清理测试产生的临时文件"""
-    prefixes = ["test_db_", "test_workspace_", "test_audit_", "test_ws_api_", "test_ws_tex"]
+    prefixes = ["test_db_", "test_workspace_", "test_audit_", "test_ws_api_", "test_ws_tex", "test_ws_doi"]
     for root, dirs, files in os.walk(tests_root):
         for item in dirs + files:
             if any(prefix in item for prefix in prefixes):
@@ -83,8 +83,11 @@ def run_suite():
     results = {"passed": 0, "failed": 0, "failed_list": []}
     start_total = time.time()
 
-    # 并行池
-    with ProcessPoolExecutor(max_workers=os.cpu_count() + 2) as executor:
+    # 并行池：封顶 8——server 导入 ~13s/进程，20 核全开反而因
+    # 导入争抢（磁盘/内存抖动）使慢测试超时（实测 22 worker 时
+    # 15s 的单测都被拖到 180s+）。
+    max_workers = min(os.cpu_count() + 2, 8)
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(run_frontend_lint, ROOT_DIR),
             executor.submit(run_frontend_tests, ROOT_DIR)
