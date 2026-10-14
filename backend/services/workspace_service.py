@@ -13,7 +13,7 @@ class WorkspaceService:
         Returns: list of (doc_id, full_path) for NEW files.
         """
         print(f"[Workspace] Scanning: {self.workspace_path}")
-        physical_files = [f for f in os.listdir(self.workspace_path) if f.lower().endswith('.pdf')]
+        physical_files = [f for f in os.listdir(self.workspace_path) if f.lower().endswith(('.pdf', '.tex', '.zip'))]
         db_docs = self.db.get_all_documents()
         db_filenames = {d['filename'] for d in db_docs}
 
@@ -38,7 +38,7 @@ class WorkspaceService:
 
         physical_files = await loop.run_in_executor(
             None,
-            lambda: [f for f in os.listdir(self.workspace_path) if f.lower().endswith('.pdf')]
+            lambda: [f for f in os.listdir(self.workspace_path) if f.lower().endswith(('.pdf', '.tex', '.zip'))]
         )
 
         db_docs = await loop.run_in_executor(None, self.db.get_all_documents)

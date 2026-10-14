@@ -40,6 +40,14 @@ class MetadataConfig:
     DEFAULT_LABEL = "Basic Insight"
     REQUIRED_FIELDS = ["title", "authors", "abstract"]
 
+# ==== TeX Ingestion ====
+class TexConfig:
+    MAX_MAIN_TEX_BYTES = 5 * 1024 * 1024      # 单 .tex 上限
+    MAX_ZIP_BYTES = 100 * 1024 * 1024         # zip 本身上限
+    MAX_ZIP_TOTAL_BYTES = 300 * 1024 * 1024   # 解压总上限（防 zip 炸弹）
+    MAX_INPUT_DEPTH = 50                      # \input 图遍历深度上限
+    MAIN_TEX_NAME_HINTS = ("main", "paper", "article", "root", "ms", "manuscript", "tex")
+
 # ==== Security ====
 class SecurityConfig:
     ALLOWED_ORIGINS = [

@@ -5,6 +5,16 @@ import urllib.parse
 import uvicorn
 import asyncio
 import time
+
+# 路径引导必须先于任何 backend 内 import：python_embed 的 ._pth 隔离模式
+# 不会把脚本目录加入 sys.path，`python backend/server.py` 直接启动时
+# `from backend.constants import ...` 与 `from constants import ...` 均会失败。
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(BASE_DIR)
+for _p in (BASE_DIR, _ROOT_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -17,11 +27,9 @@ try:
 except ImportError:
     from constants import SecurityConfig, ServerConfig, LoggingConfig, MetricsConfig, WebSocketConfig
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(BASE_DIR)
-
 from database import Database
 from services.ocr_service import run_full_ocr_workflow
+from services.tex_service import run_tex_workflow
 from services.ai_service import call_chat_api
 from utils.security import secure_filename
 from services.config_service import ConfigService
@@ -34,6 +42,17 @@ from utils.health import health_checker
 from utils.cache import init_cache, get_cache
 from utils.websocket import ws_manager, progress_tracker, EventType
 from core.priority_queue import priority_task_hub, TaskPriority
+
+SUPPORTED_EXTS = (".pdf", ".tex", ".zip")
+
+def _queue_workflow(doc_id, stored_path):
+    """按扩展名分流到 OCR 或 tex 工作流（/documents/add、/workspace/sync、/reprocess 共用）"""
+    ext = os.path.splitext(stored_path)[1].lower()
+    if ext == ".pdf":
+        return run_full_ocr_workflow
+    if ext in (".tex", ".zip"):
+        return run_tex_workflow
+    raise ValueError(f"unsupported extension: {ext}")
 
 class AppState:
     def __init__(self):
@@ -247,7 +266,11 @@ async def sync_workspace():
         if not has_markdown or not has_basic or d['ocr_status'] in ['pending', 'failed']:
             stored_path = d.get('stored_path')
             if stored_path and os.path.exists(stored_path):
-                await task_hub.add_task(d['id'], run_full_ocr_workflow, stored_path)
+                try:
+                    workflow = _queue_workflow(d['id'], stored_path)
+                except ValueError:
+                    continue  # 不支持的后缀跳过
+                await task_hub.add_task(d['id'], workflow, stored_path)
                 await ws_manager.send_document_update("updated", d['id'])
                 triggered += 1
 
@@ -336,8 +359,13 @@ async def add_document(file: UploadFile = File(...)):
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
+    ext = os.path.splitext(dest_path)[1].lower()
+    if ext not in SUPPORTED_EXTS:
+        os.remove(dest_path)
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
     doc_id = state.db.add_document(filename, "uploaded", dest_path)
-    await task_hub.add_task(doc_id, run_full_ocr_workflow, dest_path)
+    await task_hub.add_task(doc_id, _queue_workflow(doc_id, dest_path), dest_path)
 
     doc = state.db.get_document(doc_id)
     await ws_manager.send_document_update("added", doc_id, doc)
@@ -349,7 +377,9 @@ async def add_document(file: UploadFile = File(...)):
 async def get_document_pdf(doc_id: int):
     doc = state.db.get_document(doc_id)
     if doc and doc.get('stored_path') and os.path.exists(doc['stored_path']):
-        return FileResponse(doc['stored_path'], media_type='application/pdf')
+        if doc['stored_path'].lower().endswith('.pdf'):
+            return FileResponse(doc['stored_path'], media_type='application/pdf')
+        raise HTTPException(status_code=404, detail="Not a PDF document")
     raise HTTPException(status_code=404)
 
 @app.delete("/documents/{doc_id}")
@@ -402,12 +432,17 @@ async def reprocess_document(doc_id: int, priority: str = "normal"):
 
     task_priority = priority_map.get(priority.lower(), TaskPriority.NORMAL)
 
+    try:
+        workflow = _queue_workflow(doc_id, doc['stored_path'])
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {doc.get('filename')}")
+
     if priority_task_hub and task_priority.value < TaskPriority.NORMAL.value:
-        await priority_task_hub.add_task(doc_id, run_full_ocr_workflow, doc['stored_path'],
+        await priority_task_hub.add_task(doc_id, workflow, doc['stored_path'],
                                          priority=task_priority, force=True)
         task_logger.log_task("queued_priority", doc_id, priority=task_priority.name)
     else:
-        await task_hub.add_task(doc_id, run_full_ocr_workflow, doc['stored_path'], force=True)
+        await task_hub.add_task(doc_id, workflow, doc['stored_path'], force=True)
         task_logger.log_task("queued", doc_id)
 
     return {"success": True}

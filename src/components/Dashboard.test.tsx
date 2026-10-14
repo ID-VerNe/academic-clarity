@@ -99,11 +99,11 @@ describe('Dashboard Filtering', () => {
 
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
     expect(fileInput).not.toBeNull();
-    expect(fileInput!.accept).toBe('.pdf');
+    expect(fileInput!.accept).toBe('.pdf,.tex,.zip');
 
     // Import button click must trigger the hidden input's click
     const clickSpy = vi.spyOn(fileInput!, 'click');
-    fireEvent.click(screen.getByText('Import PDF'));
+    fireEvent.click(screen.getByText('Import PDF / LaTeX'));
     expect(clickSpy).toHaveBeenCalled();
 
     // Selecting a file must invoke onUpload with that file
