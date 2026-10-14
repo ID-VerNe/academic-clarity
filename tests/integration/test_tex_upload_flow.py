@@ -63,6 +63,11 @@ class TestTexUploadFlow(unittest.TestCase):
         self._client_cm.__exit__(None, None, None)
         shutil.rmtree(self.test_ws, ignore_errors=True)
 
+    @classmethod
+    def tearDownClass(cls):
+        # 清理 argv 注入用的模块级 workspace
+        shutil.rmtree(module_ws, ignore_errors=True)
+
     @staticmethod
     def _wait_for(predicate, timeout=15.0):
         deadline = time.time() + timeout
