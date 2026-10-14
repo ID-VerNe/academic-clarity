@@ -17,10 +17,11 @@ import {
   Search,
   Calendar,
   Building2,
-  X
+  X,
+  Quote
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Document } from '../types';
+import { Document, KnowledgeClaim } from '../types';
 import { api } from '../api/client';
 
 interface DashboardProps {
@@ -50,6 +51,15 @@ export const Dashboard = ({
   const [selectedJournal, setSelectedJournal] = useState<string>('all');
   const [selectedYear, setSelectedYear] = useState<string>('all');
 
+  // Phase 2：知识层 Claims 检索模式
+  const [mode, setMode] = useState<'papers' | 'claims'>('papers');
+  const [claimsQuery, setClaimsQuery] = useState('');
+  const [claimsResults, setClaimsResults] = useState<KnowledgeClaim[]>([]);
+  const [claimsLoading, setClaimsLoading] = useState(false);
+  const [claimsSearched, setClaimsSearched] = useState(false);
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestedCount, setIngestedCount] = useState<number | null>(null);
+
   // Poll for active tasks
   useEffect(() => {
     const fetchTasks = async () => {
@@ -70,6 +80,39 @@ export const Dashboard = ({
       await api.syncWorkspace();
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  // Phase 2：跨库检索 claims（limit 取 20，引用模式同样口径）
+  const handleClaimsSearch = async () => {
+    if (!claimsQuery.trim()) return;
+    setClaimsLoading(true);
+    try {
+      const data = await api.searchKnowledge(claimsQuery.trim(), 20);
+      setClaimsResults(data.results || []);
+      setClaimsSearched(true);
+    } catch (e) {
+      console.error('Knowledge search failed', e);
+      setClaimsResults([]);
+      setClaimsSearched(true);
+    } finally {
+      setClaimsLoading(false);
+    }
+  };
+
+  // 批量摄入：把已完成 OCR + Basic Insight 的文档写入知识库（幂等）
+  const handleIngestAll = async () => {
+    setIngesting(true);
+    try {
+      const targets = docs.filter(d => d.ocr_status === 'completed' && d.basic_insight_json);
+      for (const d of targets) {
+        await api.ingestKnowledge(d.id);
+      }
+      setIngestedCount(targets.length);
+    } catch (e) {
+      console.error('Knowledge ingest failed', e);
+    } finally {
+      setIngesting(false);
     }
   };
 
@@ -172,7 +215,8 @@ export const Dashboard = ({
         </div>
       </div>
 
-      {/* Intelligence Filter Bar */}
+      {/* Intelligence Filter Bar（仅论文库模式） */}
+      {mode === 'papers' && (
       <div className="bg-white border border-slate-200 rounded-3xl p-3 shadow-sm flex flex-wrap items-center gap-4">
         <div className="flex-1 min-w-[300px] relative group">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
@@ -216,7 +260,7 @@ export const Dashboard = ({
           </div>
 
           {(selectedJournal !== 'all' || selectedYear !== 'all' || searchQuery) && (
-            <button 
+            <button
               onClick={() => { setSelectedJournal('all'); setSelectedYear('all'); setSearchQuery(''); }}
               className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors"
               title="Clear Filters"
@@ -226,6 +270,37 @@ export const Dashboard = ({
           )}
         </div>
       </div>
+      )}
+
+      {/* Phase 2：Knowledge Claims 检索工具条（仅 Claims 模式） */}
+      {mode === 'claims' && (
+        <div className="bg-white border border-slate-200 rounded-3xl p-3 shadow-sm flex flex-wrap items-center gap-4">
+          <div className="flex-1 min-w-[300px] relative group">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+            <input
+              type="text"
+              placeholder="Search claims across the knowledge base..."
+              value={claimsQuery}
+              onChange={(e) => setClaimsQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleClaimsSearch()}
+              className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-indigo-100 transition-all outline-none"
+            />
+            {claimsQuery && (
+              <button onClick={() => { setClaimsQuery(''); setClaimsResults([]); setClaimsSearched(false); }} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={handleClaimsSearch}
+            disabled={claimsLoading || !claimsQuery.trim()}
+            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100 disabled:bg-slate-300"
+          >
+            {claimsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+            Search Claims
+          </button>
+        </div>
+      )}
 
       {/* Active Tasks Queue */}
       <AnimatePresence>
@@ -265,8 +340,19 @@ export const Dashboard = ({
       <section>
         <div className="flex items-center justify-between mb-8 border-b border-slate-200 pb-px">
           <div className="flex gap-8">
-            <button className="text-indigo-600 font-bold text-sm border-b-2 border-indigo-600 pb-4 -mb-px">
-              Research Library {filteredDocs.length !== docs.length && `(${filteredDocs.length}/${docs.length})`}
+            <button
+              onClick={() => setMode('papers')}
+              className={`font-bold text-sm border-b-2 pb-4 -mb-px transition-colors ${
+                mode === 'papers' ? 'text-indigo-600 border-indigo-600' : 'text-slate-400 border-transparent hover:text-slate-600'}`}
+            >
+              Research Library {mode === 'papers' && filteredDocs.length !== docs.length && `(${filteredDocs.length}/${docs.length})`}
+            </button>
+            <button
+              onClick={() => setMode('claims')}
+              className={`font-bold text-sm border-b-2 pb-4 -mb-px transition-colors ${
+                mode === 'claims' ? 'text-indigo-600 border-indigo-600' : 'text-slate-400 border-transparent hover:text-slate-600'}`}
+            >
+              Knowledge Claims
             </button>
           </div>
           <div className="flex items-center gap-4 pb-4">
@@ -282,7 +368,79 @@ export const Dashboard = ({
           </div>
         </div>
 
-        {filteredDocs.length === 0 ? (
+        {mode === 'claims' ? (
+          /* ── Phase 2：Claims 检索结果 ─────────────────────── */
+          claimsSearched && claimsResults.length === 0 ? (
+            <div className="py-20 text-center space-y-4">
+              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto">
+                <Search className="w-8 h-8 text-slate-300" />
+              </div>
+              <p className="text-slate-400 font-medium">No claims match "{claimsQuery}".</p>
+              <p className="text-slate-400 text-xs">知识库检索的是 claim 文本（概念 + 引文），不是 OCR 原文。</p>
+            </div>
+          ) : claimsResults.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {claimsResults.map((c) => {
+                const targetDoc = docs.find(d => d.id === c.doc_id);
+                return (
+                  <motion.div
+                    key={c.claim_id}
+                    whileHover={targetDoc ? { y: -4, boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' } : undefined}
+                    onClick={() => targetDoc && onSelectDoc(targetDoc)}
+                    className={`bg-white border-2 border-slate-100 rounded-3xl p-6 flex flex-col gap-3 transition-all duration-300 group shadow-sm ${
+                      targetDoc ? 'hover:border-indigo-200 cursor-pointer' : 'opacity-60'}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-indigo-50 text-indigo-700 border border-indigo-100">
+                        {c.concept}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${
+                        c.prompt_id.endsWith('~section')
+                          ? 'bg-amber-50 text-amber-700 border-amber-100'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-100'}`}
+                        title={c.prompt_id.endsWith('~section') ? '章节级转述（锚指向真实段落）' : '段落级逐字'}>
+                        {c.prompt_id.endsWith('~section') ? 'T2 section' : 'T1 verbatim'}
+                      </span>
+                    </div>
+                    <p className="text-[13px] leading-relaxed text-slate-700 font-medium">{c.quote}</p>
+                    <div className="mt-auto pt-3 border-t border-slate-100 flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold text-slate-500 truncate">{c.title || c.paper_id || '未知论文'}</p>
+                        {c.heading_path && <p className="text-[9px] text-slate-400 truncate">{c.heading_path}</p>}
+                      </div>
+                      {targetDoc && (
+                        <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
+                          Open in Reader
+                        </span>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="py-20 text-center space-y-4">
+              <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mx-auto">
+                <Quote className="w-8 h-8 text-indigo-300" />
+              </div>
+              <p className="text-slate-500 font-bold">Knowledge Base</p>
+              <p className="text-slate-400 text-sm max-w-md mx-auto">
+                检索跨论文的结构化 claim（概念 + 逐字引文 + 可解析锚）。先摄入已完成 OCR 与 Basic Insight 的文档，再搜索。
+              </p>
+              {ingestedCount !== null && (
+                <p className="text-emerald-600 text-xs font-bold">已摄入 {ingestedCount} 篇文档，在上方搜索试试。</p>
+              )}
+              <button
+                onClick={handleIngestAll}
+                disabled={ingesting || docs.filter(d => d.ocr_status === 'completed' && d.basic_insight_json).length === 0}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100 disabled:bg-slate-300"
+              >
+                {ingesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Quote className="w-4 h-4" />}
+                Ingest {docs.filter(d => d.ocr_status === 'completed' && d.basic_insight_json).length} Documents
+              </button>
+            </div>
+          )
+        ) : filteredDocs.length === 0 ? (
           <div className="py-20 text-center space-y-4">
             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto">
               <Search className="w-8 h-8 text-slate-300" />

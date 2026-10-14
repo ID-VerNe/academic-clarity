@@ -34,6 +34,8 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
   const [chatQuery, setChatQuery] = useState('');
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string}[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  // Phase 2：引用模式（知识库逐字引文 → LLM，全文不外溢）
+  const [citeMode, setCiteMode] = useState(false);
   
   // Resizable Logic: Left Sidebar
   const [leftWidth, setLeftWidth] = useState(260);
@@ -86,14 +88,30 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
 
   const handleSendMessage = async () => {
     if (!chatQuery.trim()) return;
-    
+
     const userMsg = chatQuery;
     setChatQuery('');
     setChatHistory(prev => [...prev, { role: 'user', content: userMsg }]);
     setIsTyping(true);
 
     try {
-      const data = await api.chat(doc.id, userMsg);
+      let data;
+      if (citeMode) {
+        // 引用模式：先跨库检索，只把本文档的逐字引文喂给 LLM
+        // （limit 20 再按 doc_id 过滤；无命中不调 LLM，避免幻觉引文）
+        const search = await api.searchKnowledge(userMsg, 20);
+        const quotes = ((search.results || []) as any[])
+          .filter(r => r.doc_id === doc.id)
+          .map(r => r.quote);
+        if (quotes.length === 0) {
+          setChatHistory(prev => [...prev, { role: 'ai',
+            content: '未找到可引用段落（引用模式只检索知识库中的逐字引文；请先在 Dashboard 摄入知识库，或关闭引用模式）' }]);
+          return;
+        }
+        data = await api.chat(doc.id, userMsg, quotes);
+      } else {
+        data = await api.chat(doc.id, userMsg);
+      }
       if (data.response) {
         setChatHistory(prev => [...prev, { role: 'ai', content: data.response }]);
       } else {
@@ -210,7 +228,7 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
            <GripVertical className="w-3 h-3 text-white opacity-0 group-hover:opacity-100" />
         </div>
 
-        <ChatSidebar 
+        <ChatSidebar
           docId={doc.id}
           collapsed={rightCollapsed}
           setCollapsed={setRightCollapsed}
@@ -219,6 +237,8 @@ export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
           setChatQuery={setChatQuery}
           isTyping={isTyping}
           onSendMessage={handleSendMessage}
+          citeMode={citeMode}
+          setCiteMode={setCiteMode}
         />
       </motion.aside>
     </div>

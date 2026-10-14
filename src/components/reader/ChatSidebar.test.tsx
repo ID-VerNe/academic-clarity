@@ -106,19 +106,48 @@ describe('ChatSidebar Behavioral Tests', () => {
 
   it('triggers onSendMessage when Enter is pressed in the input', () => {
     render(
-      <ChatSidebar 
-        docId={1} 
-        collapsed={false} 
-        chatHistory={[]} 
-        chatQuery="Some query" 
-        isTyping={false} 
-        {...mockHandlers} 
+      <ChatSidebar
+        docId={1}
+        collapsed={false}
+        chatHistory={[]}
+        chatQuery="Some query"
+        isTyping={false}
+        {...mockHandlers}
       />
     );
-    
+
     const input = screen.getByPlaceholderText(/Deep query document/i);
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
-    
+
     expect(mockHandlers.onSendMessage).toHaveBeenCalled();
+  });
+
+  it('Phase 2: toggles quote mode and switches the input placeholder', () => {
+    const setCiteMode = vi.fn();
+    const baseProps = {
+      docId: 1,
+      collapsed: false,
+      chatHistory: [],
+      chatQuery: '',
+      isTyping: false,
+      setCollapsed: vi.fn(),
+      setChatQuery: vi.fn(),
+      onSendMessage: vi.fn(),
+    };
+
+    // 关闭态：点击 → 请求开启
+    const { rerender } = render(
+      <ChatSidebar {...baseProps} citeMode={false} setCiteMode={setCiteMode} />
+    );
+    fireEvent.click(screen.getByLabelText('Toggle Quote Mode'));
+    expect(setCiteMode).toHaveBeenCalledWith(true);
+
+    // 开启态：占位符切换为引用模式提示，再点击 → 请求关闭
+    rerender(
+      <ChatSidebar {...baseProps} citeMode={true} setCiteMode={setCiteMode} />
+    );
+    expect(screen.getByPlaceholderText(/Quote mode/i)).toBeDefined();
+    fireEvent.click(screen.getByLabelText('Toggle Quote Mode'));
+    expect(setCiteMode).toHaveBeenCalledWith(false);
   });
 });

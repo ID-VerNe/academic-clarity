@@ -13,10 +13,10 @@ def run_python_test(test_path, python_exe, backend_dir):
         env["PYTHONPATH"] = backend_dir + os.pathsep + env.get("PYTHONPATH", "")
         # 获取测试文件所在的目录，用于相对导入
         test_dir = os.path.dirname(test_path)
-        
+
         proc = subprocess.run(
             [python_exe, test_path],
-            capture_output=True, text=True, encoding='cp437', errors='replace', env=env, timeout=300
+            capture_output=True, text=True, encoding='cp437', errors='replace', env=env, timeout=600
         )
         return {
             "name": f"Py: {os.path.relpath(test_path, os.path.dirname(backend_dir))}", 
@@ -32,7 +32,8 @@ def run_frontend_lint(root_dir):
     start = time.time()
     print("  [Spawn] Starting Frontend Lint (pnpm lint)...")
     try:
-        proc = subprocess.run("pnpm lint", cwd=root_dir, capture_output=True, text=True, shell=True, timeout=300)
+        proc = subprocess.run("pnpm lint", cwd=root_dir, capture_output=True, text=True,
+                              encoding='utf-8', errors='replace', shell=True, timeout=600)
         return {"name": "FE: TSC Lint", "success": proc.returncode == 0, "stdout": proc.stdout, "stderr": proc.stderr, "duration": time.time() - start}
     except Exception as e:
         return {"name": "FE Lint", "success": False, "stdout": "", "stderr": str(e), "duration": 0}
@@ -41,14 +42,16 @@ def run_frontend_tests(root_dir):
     start = time.time()
     print("  [Spawn] Starting Frontend UI Tests (pnpm test)...")
     try:
-        proc = subprocess.run("pnpm test", cwd=root_dir, capture_output=True, text=True, shell=True, timeout=300)
+        proc = subprocess.run("pnpm test", cwd=root_dir, capture_output=True, text=True,
+                              encoding='utf-8', errors='replace', shell=True, timeout=600)
         return {"name": "FE: UI Logic (Vitest)", "success": proc.returncode == 0, "stdout": proc.stdout, "stderr": proc.stderr, "duration": time.time() - start}
     except Exception as e:
         return {"name": "FE UI Tests", "success": False, "stdout": "", "stderr": str(e), "duration": 0}
 
 def cleanup_temp_files(tests_root):
     """递归清理测试产生的临时文件"""
-    prefixes = ["test_db_", "test_workspace_", "test_audit_", "test_ws_api_", "test_ws_tex", "test_ws_doi"]
+    prefixes = ["test_db_", "test_workspace_", "test_audit_", "test_ws_api_", "test_ws_tex",
+                "test_ws_doi", "test_ws_know", "test_ws_know_sec"]
     for root, dirs, files in os.walk(tests_root):
         for item in dirs + files:
             if any(prefix in item for prefix in prefixes):
@@ -86,6 +89,9 @@ def run_suite():
     # 并行池：封顶 8——server 导入 ~13s/进程，20 核全开反而因
     # 导入争抢（磁盘/内存抖动）使慢测试超时（实测 22 worker 时
     # 15s 的单测都被拖到 180s+）。
+    # timeout=600：8 路并行下 know 家族测试实测系统性慢 ~3.5 倍
+    # （CPU 配额争抢），95s 的单文件可被拖到 330s+；600s 仍能
+    # 抓住真挂死（10 分钟无产出），只是不再拿时钟赛跑当门禁。
     max_workers = min(os.cpu_count() + 2, 8)
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = [
