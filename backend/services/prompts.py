@@ -18,5 +18,17 @@ BASIC_INSIGHT_PROMPT = """
         - keywords: 5-8 relevant terms.
         - summary: 3 power-bullets on 'Novelty', 'Method', and 'Impact'.
 
+        ### EVIDENCE QUOTES (mandatory)
+        - Provide an "evidence_quotes" object mapping field names to VERBATIM
+          quotes copied exactly from the document. Cover the prose fields:
+          "title", "abstract", "keywords", "summary".
+        - Copy character-for-character from the markdown. Do NOT paraphrase,
+          translate, or reorder. You may join fragments from one sentence with
+          ' ... ' to skip words, but every fragment must come from a single
+          paragraph of the document.
+        - No narrative wrapping ("the paper states...", "authors say...").
+          Output the raw original text only.
+        - If no verbatim text exists for a field, use null.
+
         Return ONLY a JSON object.
         """

@@ -2,7 +2,8 @@
 
 覆盖：全链路/锚可解析不变量、T1 段落级、T2 章节级（含无 abstract
 标题退化）、幂等、5% 漂移重绑、空 OCR skip、search 回填、4 线程并发
-写无 database is locked。
+写无 database is locked、evidence_quotes 逐字引文升级（T1/回退/null/
+分片/papers 行不污染）。
 """
 import os
 import sys
@@ -263,6 +264,78 @@ class TestIngestFullFlow(KnowledgeServiceTestBase):
         self.assertEqual(errors, [], f"concurrent ingest errors: {errors}")
         for d in docs:
             self.assertGreaterEqual(len(ks.get_paper_claims(f"doc:{d}")), 7)
+
+
+class TestEvidenceQuotesV2(KnowledgeServiceTestBase):
+    """v2 prompt 的 evidence_quotes（字段名 → 逐字引文）适配行为。"""
+
+    VERBATIM = "This survey of false data injection attacks targets the state estimator."
+
+    def _papers_row(self, paper_id):
+        conn = _conn()
+        try:
+            return conn.execute("SELECT title, doi FROM papers WHERE paper_id=?",
+                                (paper_id,)).fetchone()
+        finally:
+            conn.close()
+
+    def test_verbatim_evidence_upgrades_claim_to_t1(self):
+        insight = dict(INSIGHT, evidence_quotes={"abstract": self.VERBATIM})
+        doc_id = self._add_doc(insight=insight)
+        ks.ingest_document(doc_id, self.db)
+        claims = {c[0]: c for c in self._claims(f"doc:{doc_id}")}
+        abstract_claim = claims["basic_insight.abstract"]
+        # claim 文本 = 逐字引文；T1 段落级；锚 = 该段
+        self.assertEqual(abstract_claim[1], self.VERBATIM)
+        self.assertEqual(abstract_claim[4], ks.PROMPT_ID_PARA)
+        self.assertEqual(abstract_claim[2], anchors.anchor_id(self.VERBATIM))
+        self.assertIn("Abstract", abstract_claim[3])
+
+    def test_non_verbatim_evidence_falls_back_to_field_text(self):
+        insight = dict(INSIGHT, evidence_quotes={"abstract": "hallucinated zzz quote"})
+        doc_id = self._add_doc(insight=insight)
+        ks.ingest_document(doc_id, self.db)
+        claims = {c[0]: c for c in self._claims(f"doc:{doc_id}")}
+        abstract_claim = claims["basic_insight.abstract"]
+        # 引文不逐字 → 回退字段文本（LLM 摘要），T2 章节级
+        self.assertEqual(abstract_claim[1], INSIGHT["abstract"])
+        self.assertEqual(abstract_claim[4], ks.PROMPT_ID_SECT)
+
+    def test_null_evidence_ignored(self):
+        insight = dict(INSIGHT, evidence_quotes={"abstract": None, "summary": None})
+        doc_id = self._add_doc(insight=insight)
+        result = ks.ingest_document(doc_id, self.db)
+        self.assertGreaterEqual(result["section_level"], 1)
+        claims = {c[0]: c for c in self._claims(f"doc:{doc_id}")}
+        self.assertEqual(claims["basic_insight.abstract"][1], INSIGHT["abstract"])
+
+    def test_fragmented_evidence_anchors_to_single_paragraph(self):
+        # ' ... ' 分片：两片段同段 → classify_fragmented MATCHED → T1
+        frag = "Detection latency drops below one second ... in simulation."
+        insight = dict(INSIGHT, evidence_quotes={"summary": frag})
+        doc_id = self._add_doc(insight=insight)
+        ks.ingest_document(doc_id, self.db)
+        claims = {c[0]: c for c in self._claims(f"doc:{doc_id}")}
+        summary_claim = claims["basic_insight.summary"]
+        self.assertEqual(summary_claim[4], ks.PROMPT_ID_PARA)
+        self.assertEqual(summary_claim[1], frag)
+        self.assertEqual(
+            summary_claim[2],
+            anchors.anchor_id("Detection latency drops below one second in simulation."))
+
+    def test_papers_row_not_polluted_by_evidence_title(self):
+        # 引文替换只作用于 claims；papers 行标题/DOI 取干净元数据
+        insight = dict(INSIGHT, evidence_quotes={
+            "title": "We survey detection methods comprehensively."})
+        doc_id = self._add_doc(insight=insight)
+        ks.ingest_document(doc_id, self.db)
+        title, doi = self._papers_row(f"doc:{doc_id}")
+        self.assertEqual(title, "Survey of False Data Injection")
+        self.assertEqual(doi, "10.1109/TSG.2024.1234567")
+        # 而 title claim 确实被替换成了逐字引文
+        claims = {c[0]: c for c in self._claims(f"doc:{doc_id}")}
+        self.assertEqual(claims["basic_insight.title"][1],
+                         "We survey detection methods comprehensively.")
 
 
 if __name__ == "__main__":

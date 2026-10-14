@@ -1,10 +1,8 @@
-"""knowledge_service — know 知识层适配层（Phase 2，≤200 行）。
-
-vendor（backend/vendor/know/）逐字拷贝不修改；本层负责：目录约定适配
-（Basic Insight → claims）；两级锚定（T1 段落级逐字 / T2 章节级转述
-降级，锚永可解析）；幂等+重绑（补 know.ingest 不重绑缺口 R1）；
-busy_timeout + 单写锁。paper_id 固定 'doc:{id}'（DOI 未验证会变，
-主键须对 re-ingest 稳定；身份 resolve_doi({}, ...) → unresolved_meta）。
+"""knowledge_service — know 知识层适配层（Phase 2，≤200 行）：vendor
+（backend/vendor/know/）逐字禁改；Basic Insight → claims（evidence_quotes
+逐字引文优先）；两级锚定（T1 逐字 / T2 转述降级，锚永可解析）；幂等+
+重绑（补 know.ingest 不重绑缺口 R1）；busy_timeout + 单写锁。paper_id
+固定 'doc:{id}'（re-ingest 稳定；DOI 走 resolve_doi → unresolved_meta）。
 归档层在 knowledge_archive。
 """
 import json, os, re, sys, threading
@@ -83,8 +81,7 @@ def ingest_document(doc_id: int, db) -> dict:
     paras = anchors.paragraphize(doc.get("ocr_markdown") or "")
     if not paras:
         return _skip(f"doc:{doc_id}", "no_paragraphs")
-    row = next((m for m in db.get_document_metadata(doc_id)
-                if m["label"] == "Basic Insight"), None)
+    row = next((m for m in db.get_document_metadata(doc_id) if m["label"] == "Basic Insight"), None)
     if not row:
         return _skip(f"doc:{doc_id}", "no_basic_insight")
     try:
@@ -93,6 +90,12 @@ def ingest_document(doc_id: int, db) -> dict:
         return _skip(f"doc:{doc_id}", "bad_insight_json")
     paras_with_path = _paragraphs_with_path(doc["ocr_markdown"])
     path_by_para = {p: path for p, path in paras_with_path}
+    meta = _paper_meta(doc, insight, *know_identity.resolve_doi({}, insight.get("doi") or ""))
+    paper_id = meta["paper_id"]
+    eq = insight.get("evidence_quotes") if isinstance(insight.get("evidence_quotes"), dict) else {}
+    for f, _c in _FIELD_MAP:                        # v2 逐字引文：命中即替换字段文本
+        ev = anchors.coerce_quote(eq.get(f))        # 须在 meta 之后：防污染 papers 行
+        if ev and anchors.classify_fragmented(ev, paras)[0] == anchors.MATCHED: insight[f] = ev
     claims, section_level = [], 0
     for field, concept in _FIELD_MAP:               # T1 逐字段 → T2 降级
         quote = anchors.coerce_quote(insight.get(field))
@@ -109,9 +112,6 @@ def ingest_document(doc_id: int, db) -> dict:
             section_level += 1
         claims.append({"concept": concept, "quote": quote, "anchor": anchor,
                        "heading_path": heading or "", "prompt_id": prompt_id})
-    meta = _paper_meta(doc, insight,
-                       *know_identity.resolve_doi({}, insight.get("doi") or ""))
-    paper_id = meta["paper_id"]
     with _write_lock:                               # 单写锁
         conn = _conn()
         try:
