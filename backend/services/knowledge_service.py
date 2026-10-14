@@ -1,11 +1,11 @@
 """knowledge_service — know 知识层适配层（Phase 2，≤200 行）。
 
 vendor（backend/vendor/know/）逐字拷贝不修改；本层负责：目录约定适配
-（Basic Insight → claims，不依赖 paper-tools 的 _v2_ json/md 目录约定）；
-两级锚定（T1 段落级逐字 / T2 章节级转述降级，锚永可解析）；幂等+重绑
-（补 know.ingest 不重绑缺口 R1）；busy_timeout + 单写锁。paper_id 固定
-'doc:{id}'（DOI 未验证会变，主键须对 re-ingest 稳定；身份走
-resolve_doi({}, ...) → unresolved_meta）。归档层在 knowledge_archive。
+（Basic Insight → claims）；两级锚定（T1 段落级逐字 / T2 章节级转述
+降级，锚永可解析）；幂等+重绑（补 know.ingest 不重绑缺口 R1）；
+busy_timeout + 单写锁。paper_id 固定 'doc:{id}'（DOI 未验证会变，
+主键须对 re-ingest 稳定；身份 resolve_doi({}, ...) → unresolved_meta）。
+归档层在 knowledge_archive。
 """
 import json, os, re, sys, threading
 
@@ -53,13 +53,12 @@ def _conn():
     return conn
 
 def _paper_meta(doc: dict, insight: dict, doi: str, status: str) -> dict:
-    """papers 行（键与 config.insert_paper 参数同构）；title 取
-    documents.title → insight.title → filename。"""
+    """papers 行（键与 insert_paper 参数同构；title: documents→insight→filename）。"""
     m = re.search(r"\b(\d{4})\b", str(insight.get("date") or ""))
     authors = insight.get("authors") or ""
     authors_json = (json.dumps(authors, ensure_ascii=False) if isinstance(authors, list)
-                    else json.dumps([a.strip() for a in str(authors).split(",")
-                                     if a.strip()], ensure_ascii=False))
+                    else json.dumps([a for a in str(authors).split(",") if a.strip()],
+                                    ensure_ascii=False))
     return {"paper_id": f"doc:{doc['id']}",
             "title": doc.get("title") or insight.get("title") or doc.get("filename"),
             "authors": authors_json or "[]", "year": int(m.group(1)) if m else None,
@@ -74,12 +73,10 @@ def _t2_anchor(paras_with_path):
     return paras_with_path[0] if paras_with_path else ("", "")
 
 def _skip(paper_id: str, reason: str) -> dict:
-    return {"paper_id": paper_id, "claims": 0, "rebound": 0, "section_level": 0,
-            "skipped_reason": reason}
+    return dict(paper_id=paper_id, claims=0, rebound=0, section_level=0, skipped_reason=reason)
 
 def ingest_document(doc_id: int, db) -> dict:
-    """Basic Insight + ocr_markdown → claims（T1/T2 锚定）→ 知识库；
-    任何 quote 都有可解析锚（T2 兜底）→ 结构上不产生死 claim。"""
+    """Basic Insight + ocr_markdown → claims（T1/T2）→ 知识库；锚永可解析（T2 兜底）。"""
     doc = db.get_document(doc_id)
     if not doc:
         return _skip(f"doc:{doc_id}", "no_document")
@@ -143,10 +140,8 @@ def ingest_document(doc_id: int, db) -> dict:
 
 def search(query: str, limit: int = 10) -> list:
     """config.search_claims（FTS 双表 + LIKE 兜底）+ papers 回填。"""
-    if not query or not query.strip():
-        return []
+    if not (query or "").strip(): return []
     conn = _conn()
-    rows, papers = [], {}
     try:
         rows = know_config.search_claims(conn, query.strip(), limit=limit)
         if rows:
@@ -171,6 +166,20 @@ def get_paper_claims(paper_id: str) -> list:
         conn.close()
     return [{"claim_id": r[0], "concept": r[1], "quote": r[2], "anchor": r[3],
              "heading_path": r[4], "conflicting": r[5], "prompt_id": r[6]} for r in rows]
+
+
+def list_papers() -> list:
+    """papers + claim 计数（Dashboard 检索来源）。"""
+    conn = _conn()
+    try:
+        rows = conn.execute("SELECT p.paper_id, p.title, p.doi, p.identity_status, "
+                            "COUNT(c.claim_id) FROM papers p LEFT JOIN claims c "
+                            "ON c.paper_id = p.paper_id GROUP BY p.paper_id "
+                            "ORDER BY p.paper_id").fetchall()
+    finally:
+        conn.close()
+    return [{"paper_id": r[0], "title": r[1], "doi": r[2],
+             "identity_status": r[3], "claim_count": r[4]} for r in rows]
 
 def forget_paper(doc_id: int) -> bool:
     """文档删除联动：删知识行（含 FTS）+ 归档页；知识库可重建。"""

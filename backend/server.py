@@ -30,6 +30,7 @@ except ImportError:
 from database import Database
 from services.ocr_service import run_full_ocr_workflow
 from services.tex_service import run_tex_workflow
+from services import knowledge_service
 from services.ai_service import call_chat_api
 from utils.security import secure_filename
 from services.config_service import ConfigService
@@ -78,6 +79,8 @@ class AppState:
         self.use_multi_key = self.ocr_multi_key or self.llm_multi_key
 
         init_cache()
+
+        knowledge_service.init_store(path)   # Phase 2：{workspace}/knowledge/index.sqlite
 
         metrics.set_app_info(
             version="1.0.0",
@@ -185,6 +188,7 @@ async def serve_file(filename: str):
 class ChatRequest(BaseModel):
     doc_id: int
     query: str
+    quotes: list[str] | None = None   # Phase 2 引用模式：只喂逐字引文
 
 class MetadataRequest(BaseModel):
     label: str
@@ -390,6 +394,12 @@ async def delete_document(doc_id: int):
             try: os.remove(doc['stored_path'])
             except: pass
         state.db.delete_document(doc_id)
+        # Phase 2 知识层联动（R4）：知识库是派生投影，删文档即删知识行；
+        # 失败不影响文档删除本身（可删 knowledge/ 全量重建）。
+        try:
+            await asyncio.to_thread(knowledge_service.forget_paper, doc_id)
+        except Exception as e:
+            print(f"[Knowledge] forget_paper skipped: {e}")
         await ws_manager.send_document_update("deleted", doc_id)
         return {"success": True}
     return {"success": False}
@@ -486,11 +496,56 @@ async def chat_with_doc(request: ChatRequest):
     api_config = config_service.get_chat_config()
     if state.llm_multi_key:
         api_config['_use_multi_key'] = True
+    # Phase 2 引用模式：只喂逐字引文（LLM 不许外溢，cite:// 编号可回查）；
+    # 无 quotes → 现有全量 ocr_markdown。
+    if request.quotes:
+        context = "\n".join(f"[cite://{i + 1}] {q}"
+                            for i, q in enumerate(request.quotes))
+    else:
+        context = doc['ocr_markdown']
     try:
-        response = await call_chat_api(request.query, doc['ocr_markdown'], api_config)
+        response = await call_chat_api(request.query, context, api_config)
         return {"response": response}
     except Exception as e:
         return {"response": f"AI Error: {str(e)}"}
+
+# ---------- Phase 2：know 知识层 ----------
+
+@app.post("/knowledge/ingest/{doc_id}")
+async def ingest_knowledge(doc_id: int):
+    doc = state.db.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404)
+    if not doc.get('ocr_markdown'):
+        raise HTTPException(status_code=400, detail="no ocr markdown")
+    try:
+        # 同步 CPU 活进线程池（照 workspace_service 先例）
+        result = await asyncio.to_thread(
+            knowledge_service.ingest_document, doc_id, state.db)
+        await ws_manager.send_document_update("updated", doc_id,
+                                              state.db.get_document(doc_id))
+        return {"success": True, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/knowledge/search")
+async def search_knowledge(q: str, limit: int = 10):
+    if not q or not q.strip():
+        raise HTTPException(status_code=400, detail="empty query")
+    if len(q) > 200:                     # 超长查询防御（FTS/LIKE 均不 OOM）
+        raise HTTPException(status_code=400, detail="query too long")
+    rows = await asyncio.to_thread(knowledge_service.search, q.strip(),
+                                   min(max(limit, 1), 100))
+    return {"results": rows}
+
+@app.get("/knowledge/papers")
+async def list_knowledge_papers():
+    rows = await asyncio.to_thread(knowledge_service.list_papers)
+    return {"papers": rows}
+
+@app.get("/knowledge/papers/{paper_id}/claims")
+async def get_knowledge_paper_claims(paper_id: str):
+    return {"claims": knowledge_service.get_paper_claims(paper_id)}
 
 if __name__ == "__main__":
     initial_port = int(sys.argv[1]) if len(sys.argv) > 1 else ServerConfig.DEFAULT_PORT
