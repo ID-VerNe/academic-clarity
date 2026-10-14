@@ -72,6 +72,20 @@ class Database:
                 )
             ''')
 
+            self._ensure_columns(cursor, "documents", {
+                "doi": "TEXT",
+                "doi_source": "TEXT",   # 'crossref' | 'llm' | NULL
+                "bibtex": "TEXT",
+            })
+
+    def _ensure_columns(self, cursor, table: str, columns: dict) -> None:
+        """幂等加列（Phase 1 迁移）：已存在则跳过；只加列不删不改类型。"""
+        cursor.execute(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in cursor.fetchall()}
+        for name, ddl in columns.items():
+            if name not in existing:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
     def add_document_metadata(self, doc_id, label, content_json):
         with self.safe_write() as cursor:
             cursor.execute('INSERT INTO document_metadata (doc_id, label, content_json) VALUES (?, ?, ?)',
@@ -88,6 +102,24 @@ class Database:
     def delete_metadata(self, metadata_id):
         with self.safe_write() as cursor:
             cursor.execute('DELETE FROM document_metadata WHERE id = ?', (metadata_id,))
+
+    def update_document_doi(self, doc_id, doi=None, doi_source=None, bibtex=None):
+        """Phase 1：动态 SET 写入 doi/doi_source/bibtex（仿 update_document_ocr）。"""
+        with self.safe_write() as cursor:
+            updates, params = [], []
+            if doi is not None:
+                updates.append("doi = ?")
+                params.append(doi)
+            if doi_source is not None:
+                updates.append("doi_source = ?")
+                params.append(doi_source)
+            if bibtex is not None:
+                updates.append("bibtex = ?")
+                params.append(bibtex)
+            if not updates:
+                return
+            params.append(doc_id)
+            cursor.execute(f"UPDATE documents SET {', '.join(updates)} WHERE id = ?", params)
 
     def get_config(self, key, default=None):
         with self.get_connection() as conn:

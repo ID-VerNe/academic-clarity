@@ -104,3 +104,11 @@ class ConfigService:
             "api_base": self._get_val("CHAT_API_BASE", "LLM_API_BASE", "http://localhost:37210/v1"),
             "model_name": self._get_val("CHAT_MODEL_NAME", "LLM_MODEL", "gpt-4.1")
         }
+
+    def get_crossref_config(self):
+        """Phase 1：CrossRef 礼貌池参数（mailto 可留空，仅降速不错败）。"""
+        return {
+            "mailto": self._get_val("CROSSREF_MAILTO", "CROSSREF_MAILTO", ""),
+            "timeout": self._get_val_int("CROSSREF_TIMEOUT", "CROSSREF_TIMEOUT", 10),
+            "max_retries": self._get_val_int("CROSSREF_MAX_RETRIES", "CROSSREF_MAX_RETRIES", 2),
+        }
