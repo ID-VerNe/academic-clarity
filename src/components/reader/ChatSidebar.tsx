@@ -25,6 +25,9 @@ interface ChatSidebarProps {
   setChatQuery: (query: string) => void;
   isTyping: boolean;
   onSendMessage: () => void;
+  /** Phase 2 引用模式：开 → 只把知识库检索到的逐字引文喂给 LLM */
+  citeMode?: boolean;
+  setCiteMode?: (citeMode: boolean) => void;
 }
 
 export const ChatSidebar = ({
@@ -35,7 +38,9 @@ export const ChatSidebar = ({
   chatQuery,
   setChatQuery,
   isTyping,
-  onSendMessage
+  onSendMessage,
+  citeMode = false,
+  setCiteMode
 }: ChatSidebarProps) => {
   const [metadataList, setMetadataList] = useState<MetadataEntry[]>([]);
   const [isExtracting, setIsExtracting] = useState(false);
@@ -182,14 +187,26 @@ export const ChatSidebar = ({
             </div>
 
             <div className="p-4 border-t border-slate-100 bg-white">
+               {/* Phase 2：引用模式开关（仅引文进 LLM，可回查锚点） */}
+               <div className="flex items-center justify-between mb-2">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Quote Mode</span>
+                  <button
+                    aria-label="Toggle Quote Mode"
+                    onClick={() => setCiteMode?.(!citeMode)}
+                    className={`relative w-9 h-5 rounded-full transition-colors ${citeMode ? 'bg-indigo-600' : 'bg-slate-200'}`}
+                    title={citeMode ? '引用模式开：仅逐字引文进入上下文' : '引用模式关：全文进入上下文'}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${citeMode ? 'translate-x-4' : ''}`} />
+                  </button>
+               </div>
                <div className="relative flex items-center gap-2">
-                  <input 
+                  <input
                     value={chatQuery}
                     onChange={(e) => setChatQuery(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && onSendMessage()}
-                    className="w-full text-xs rounded-2xl border border-slate-200 bg-slate-50 pl-4 pr-12 py-4 text-slate-700 placeholder:text-slate-400 focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all font-medium" 
-                    placeholder="Deep query document..." 
-                    type="text" 
+                    className="w-full text-xs rounded-2xl border border-slate-200 bg-slate-50 pl-4 pr-12 py-4 text-slate-700 placeholder:text-slate-400 focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all font-medium"
+                    placeholder={citeMode ? 'Quote mode: only cited passages reach the AI...' : 'Deep query document...'}
+                    type="text"
                   />
                   <button 
                     aria-label="Send Message"

@@ -2,6 +2,17 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { Dashboard } from './Dashboard';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { Document } from '../types';
+import { api } from '../api/client';
+
+// Mock the API client（claims 检索/摄入 + 原有轮询静默）
+vi.mock('../api/client', () => ({
+  api: {
+    getActiveTasks: vi.fn().mockResolvedValue([]),
+    syncWorkspace: vi.fn().mockResolvedValue({}),
+    searchKnowledge: vi.fn().mockResolvedValue({ results: [] }),
+    ingestKnowledge: vi.fn().mockResolvedValue({ success: true, result: {} }),
+  }
+}));
 
 // Mock Document data with basic_insight_json
 const mockDocs: Document[] = [
@@ -110,5 +121,102 @@ describe('Dashboard Filtering', () => {
     const file = new File(['dummy'], 'paper.pdf', { type: 'application/pdf' });
     fireEvent.change(fileInput!, { target: { files: [file] } });
     expect(handlers.onUpload).toHaveBeenCalledWith(file);
+  });
+});
+
+describe('Dashboard Knowledge Claims (Phase 2)', () => {
+  const mockHandlers = {
+    onSelectDoc: vi.fn(),
+    onUpload: vi.fn(),
+    onDelete: vi.fn(),
+    onReprocess: vi.fn(),
+    isUploading: false
+  };
+
+  const claimResults = [
+    {
+      claim_id: 1,
+      concept: 'trading bottleneck',
+      quote: 'P2P 交易瓶颈在于各 agent 需顺序更新账本。',
+      anchor: 'P2P 交易瓶颈在于各 agent 需顺序更新账本。',
+      heading_path: 'Abstract',
+      conflicting: 0,
+      prompt_id: 'basic-insight-v1',
+      doc_id: 1,
+      title: 'Alpha Research'
+    }
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (api.getActiveTasks as any).mockResolvedValue([]);
+    (api.searchKnowledge as any).mockResolvedValue({ results: [] });
+    (api.ingestKnowledge as any).mockResolvedValue({ success: true, result: {} });
+  });
+
+  it('switches to the Claims tab, searches, and renders claim cards', async () => {
+    (api.searchKnowledge as any).mockResolvedValue({ results: claimResults });
+    render(<Dashboard docs={mockDocs} {...mockHandlers} />);
+
+    fireEvent.click(screen.getByText('Knowledge Claims'));
+
+    const input = screen.getByPlaceholderText(/Search claims/);
+    fireEvent.change(input, { target: { value: '交易' } });
+    fireEvent.click(screen.getByText('Search Claims'));
+
+    await waitFor(() => {
+      expect(screen.getByText('P2P 交易瓶颈在于各 agent 需顺序更新账本。')).toBeDefined();
+    });
+    expect(api.searchKnowledge).toHaveBeenCalledWith('交易', 20);
+    // T1 徽标与论文标题回填
+    expect(screen.getByText('T1 verbatim')).toBeDefined();
+    expect(screen.getByText('Alpha Research')).toBeDefined();
+    // 论文库网格在 claims 模式不渲染（卡片标题消失；标签页仍可见）
+    expect(screen.queryByText('Beta Science')).toBeNull();
+  });
+
+  it('opens the claim source document in Reader on card click', async () => {
+    (api.searchKnowledge as any).mockResolvedValue({ results: claimResults });
+    const handlers = { ...mockHandlers, onSelectDoc: vi.fn() };
+    render(<Dashboard docs={mockDocs} {...handlers} />);
+
+    fireEvent.click(screen.getByText('Knowledge Claims'));
+    fireEvent.change(screen.getByPlaceholderText(/Search claims/), { target: { value: '交易' } });
+    fireEvent.click(screen.getByText('Search Claims'));
+
+    await waitFor(() => {
+      expect(screen.getByText('P2P 交易瓶颈在于各 agent 需顺序更新账本。')).toBeDefined();
+    });
+    fireEvent.click(screen.getByText('P2P 交易瓶颈在于各 agent 需顺序更新账本。'));
+
+    // 点击 claim 卡片 → 用 doc_id 回填定位文档 → 进 Reader
+    expect(handlers.onSelectDoc).toHaveBeenCalledWith(mockDocs[0]);
+  });
+
+  it('ingests completed documents from the claims empty state', async () => {
+    render(<Dashboard docs={mockDocs} {...mockHandlers} />);
+
+    fireEvent.click(screen.getByText('Knowledge Claims'));
+    fireEvent.click(screen.getByText(/Ingest 2 Documents/));
+
+    await waitFor(() => {
+      expect(api.ingestKnowledge).toHaveBeenCalledTimes(2);
+    });
+    expect(api.ingestKnowledge).toHaveBeenCalledWith(1);
+    expect(api.ingestKnowledge).toHaveBeenCalledWith(2);
+    expect(screen.getByText(/已摄入 2 篇文档/)).toBeDefined();
+  });
+
+  it('shows no-match state when the knowledge search returns nothing', async () => {
+    (api.searchKnowledge as any).mockResolvedValue({ results: [] });
+    render(<Dashboard docs={mockDocs} {...mockHandlers} />);
+
+    fireEvent.click(screen.getByText('Knowledge Claims'));
+    fireEvent.change(screen.getByPlaceholderText(/Search claims/), { target: { value: '不存在的词' } });
+    fireEvent.click(screen.getByText('Search Claims'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/No claims match/)).toBeDefined();
+    });
   });
 });

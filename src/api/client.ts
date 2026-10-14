@@ -70,13 +70,43 @@ class ApiClient {
     return res.json();
   }
 
-  async chat(docId: number, query: string) {
+  async chat(docId: number, query: string, quotes?: string[]) {
     const baseUrl = await this.getBaseUrl();
     const res = await fetch(`${baseUrl}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ doc_id: docId, query })
+      body: JSON.stringify({ doc_id: docId, query, quotes })
     });
+    return res.json();
+  }
+
+  // ── Phase 2：know 知识层 ──────────────────────────────
+
+  /** 跨库检索 claims（FTS + LIKE 兜底；q 限 200 字符内） */
+  async searchKnowledge(q: string, limit = 10) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/knowledge/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+    return res.json();
+  }
+
+  /** 把一篇已完成 OCR + Basic Insight 的文档摄入知识库（幂等） */
+  async ingestKnowledge(docId: number) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/knowledge/ingest/${docId}`, { method: 'POST' });
+    return res.json();
+  }
+
+  /** 知识库论文列表（含 claim 计数） */
+  async getKnowledgePapers() {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/knowledge/papers`);
+    return res.json();
+  }
+
+  /** 单篇论文的全部 claims */
+  async getKnowledgeClaims(paperId: string) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/knowledge/papers/${encodeURIComponent(paperId)}/claims`);
     return res.json();
   }
 
