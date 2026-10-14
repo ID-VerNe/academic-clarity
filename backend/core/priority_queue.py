@@ -276,6 +276,7 @@ class PriorityTaskManager:
         for worker in self.workers:
             worker.cancel()
         await asyncio.gather(*self.workers, return_exceptions=True)
+        self.workers.clear()
         print("[PriorityTaskHub] Stopped")
 
     async def add_task(self, doc_id: int, task_func: Callable, *args,

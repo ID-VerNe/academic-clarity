@@ -25,6 +25,13 @@ class TaskManager:
     async def start_workers(self, app_state):
         """启动指定数量的并行 Worker"""
         self._app_state = app_state
+        # 单例可能被多次 lifespan 复用：先清掉旧 loop 的残留 worker，
+        # 避免 gather 到已关闭 loop 的任务导致 RuntimeError
+        self.workers.clear()
+        # 重建队列：asyncio.Queue 首次 get() 时绑定事件循环，
+        # 复用旧队列会绑定到已关闭的 loop
+        self.queue = asyncio.Queue()
+        self.active_task_ids.clear()
         print(f"[TaskHub] Launching {self.concurrency} parallel workers...")
         for i in range(self.concurrency):
             worker = asyncio.create_task(self._worker_loop(i, app_state))
@@ -128,5 +135,6 @@ class TaskManager:
         for worker in self.workers:
             worker.cancel()
         await asyncio.gather(*self.workers, return_exceptions=True)
+        self.workers.clear()
 
 task_hub = TaskManager()

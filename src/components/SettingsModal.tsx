@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Settings, Database, Cpu, FolderOpen, Save, Plus, Trash2, RefreshCw, CheckCircle, XCircle, Loader2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppConfig, MultiKeyStats, KeyConfig, KeyPoolStats } from '../types';
+import { api } from '../api/client';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -25,7 +26,7 @@ interface KeyStatsDisplay {
   max_concurrent: number;
   rpm_limit: number;
   tpm_limit: number;
-  enabled: boolean;
+  enabled?: boolean;
   is_healthy?: boolean;
   active_requests?: number;
   rpm_used?: number;
@@ -56,7 +57,7 @@ export const SettingsModal = ({
 
   const loadMultiKeyStats = async () => {
     try {
-      const stats = await window.api.getMultiKeyStats();
+      const stats = await api.getMultiKeyStats();
       setMultiKeyStats(stats);
     } catch (error) {
       console.error('Failed to load multi-key stats:', error);
@@ -112,9 +113,9 @@ export const SettingsModal = ({
     setIsSaving(true);
     try {
       if (type === 'ocr') {
-        await window.api.updateOcrKeys(JSON.stringify(keys));
+        await api.updateOcrKeys(JSON.stringify(keys));
       } else {
-        await window.api.updateLlmKeys(JSON.stringify(keys));
+        await api.updateLlmKeys(JSON.stringify(keys));
       }
       await loadMultiKeyStats();
       setShowAddForm(false);

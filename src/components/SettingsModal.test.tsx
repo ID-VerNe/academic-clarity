@@ -9,7 +9,10 @@ describe('SettingsModal Component', () => {
     WORKSPACE_PATH: '/test/path',
     DEEPSEEK_API_KEY: 'test-key',
     API_BASE: 'http://localhost:1234',
-    TABLE_STYLE: 'three-line'
+    TABLE_STYLE: 'three-line',
+    USE_MULTI_KEY: false,
+    OCR_MULTI_KEY: false,
+    LLM_MULTI_KEY: false
   };
 
   const mockHandlers = {
@@ -35,7 +38,7 @@ describe('SettingsModal Component', () => {
     
     expect(mockHandlers.onSaveConfig).toHaveBeenCalledWith('DEEPSEEK_API_KEY', 'new-key');
     
-    const apiBaseInput = screen.getByPlaceholderText('http://localhost:37210/v1');
+    const apiBaseInput = screen.getByPlaceholderText('https://api.siliconflow.cn/v1');
     fireEvent.change(apiBaseInput, { target: { value: 'http://new-base' } });
     fireEvent.blur(apiBaseInput);
     

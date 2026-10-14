@@ -1,7 +1,7 @@
 """
 Academic Clarity - Utils 模块统一导出
 """
-from backend.utils.logger import (
+from .logger import (
     get_logger,
     StructuredLogger,
     core_logger,
@@ -10,18 +10,18 @@ from backend.utils.logger import (
     db_logger,
     key_logger,
 )
-from backend.utils.metrics import metrics, MetricsCollector
-from backend.utils.health import health_checker, HealthChecker, HealthCheckResult
-from backend.utils.cache import init_cache, get_cache, CacheManager, InMemoryCache, RedisCache
-from backend.utils.websocket import ws_manager, progress_tracker, EventType, ConnectionManager
-from backend.utils.middleware import (
+from .metrics import metrics, MetricsCollector
+from .health import health_checker, HealthChecker, HealthCheckResult
+from .cache import init_cache, get_cache, CacheManager, InMemoryCache, RedisCache
+from .websocket import ws_manager, progress_tracker, EventType, ConnectionManager
+from .middleware import (
     PrometheusMetricsMiddleware,
     RequestLoggingMiddleware,
     RateLimitMiddleware,
     TimeoutMiddleware,
     create_middleware_stack,
 )
-from backend.utils.shared import (
+from .shared import (
     CircuitBreaker,
     RetryPolicy,
     RateLimiter,

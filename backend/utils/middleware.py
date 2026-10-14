@@ -197,7 +197,7 @@ def create_middleware_stack(app: ASGIApp, config: dict = None) -> ASGIApp:
             "timeout": True,
         }
 
-    from backend.utils.metrics import metrics
+    from .metrics import metrics
 
     if config.get("timeout", True):
         app = TimeoutMiddleware(app)
@@ -206,7 +206,7 @@ def create_middleware_stack(app: ASGIApp, config: dict = None) -> ASGIApp:
         app = PrometheusMetricsMiddleware(app, metrics)
 
     if config.get("logging", True):
-        from backend.utils.logger import get_logger
+        from .logger import get_logger
         logger = get_logger("http")
         app = RequestLoggingMiddleware(app, logger)
 

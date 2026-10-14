@@ -79,12 +79,16 @@ async def lifespan(app: FastAPI):
     state.initialize(initial_path)
 
     await task_hub.start_workers(state)
+    if priority_task_hub:
+        await priority_task_hub.start(state)
 
     core_logger.info("Application startup complete", uptime_start=state.start_time)
 
     yield
 
     await task_hub.shutdown()
+    if priority_task_hub:
+        await priority_task_hub.stop()
     core_logger.info("Application shutdown complete")
 
 app = FastAPI(title="Academic Clarity Backend", lifespan=lifespan)

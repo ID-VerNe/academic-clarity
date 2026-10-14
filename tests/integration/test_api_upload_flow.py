@@ -32,13 +32,23 @@ class TestApiUploadFlow(unittest.TestCase):
     def setUp(self):
         # Ensure state is initialized for testing
         state.initialize(test_ws)
-        self.client = TestClient(app)
+        # 使用上下文管理器触发 lifespan，启动 TaskHub worker，
+        # 否则入队的任务永远不会被执行，mock 不会被调用
+        self._client_cm = TestClient(app)
+        self.client = self._client_cm.__enter__()
         self.test_ws = test_ws
 
     def tearDown(self):
-        # 注意：这里不能删，因为异步任务可能还在跑。
-        # 实际清理交由 run_all_tests.py 的全局清理模式处理。
-        pass
+        self._client_cm.__exit__(None, None, None)
+
+    @staticmethod
+    def _wait_for_call(mock, timeout=5.0):
+        """等待异步 worker 认领任务（任务通过队列异步派发）"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if mock.called:
+                return
+            time.sleep(0.1)
 
     @patch('server.run_full_ocr_workflow')
     def test_upload_api_logic(self, mock_ocr):
@@ -60,6 +70,7 @@ class TestApiUploadFlow(unittest.TestCase):
         self.assertTrue(os.path.exists(physical_path), "File was not copied!")
 
         # 4. 验证后台任务是否被调用
+        self._wait_for_call(mock_ocr)
         self.assertTrue(mock_ocr.called)
         print("  API Upload Flow Logic: PASS")
 
@@ -72,6 +83,7 @@ class TestApiUploadFlow(unittest.TestCase):
         with patch('server.run_full_ocr_workflow') as mock_ocr:
             response = self.client.post(f"/documents/{doc_id}/reprocess")
             self.assertEqual(response.status_code, 200)
+            self._wait_for_call(mock_ocr)
             self.assertTrue(mock_ocr.called)
         print("  API Reprocess Endpoint: PASS")
 
