@@ -62,4 +62,15 @@ describe('Reader Component', () => {
       expect(screen.queryByText('Structure')).toBeNull();
     });
   });
+
+  it('defaults to markdown view for .tex documents (no PDF pane)', () => {
+    render(<Reader {...mockProps} doc={{ ...mockDoc, filename: 'paper.tex' }} />);
+    // PdfViewer 会对 .tex 请求 /pdf（server 对非 pdf 返回 404），
+    // 故 .tex/.zip 文档默认纯 Markdown 视图，PDF 窗格整体不挂载：
+    // 无 "Streaming PDF Bytes..."（加载态）也无 "Failed to load PDF content."（错误态）。
+    expect(screen.queryByText('Streaming PDF Bytes...')).toBeNull();
+    expect(screen.queryByText('Failed to load PDF content.')).toBeNull();
+    // markdown 内容正常渲染
+    expect(screen.getByText('Content')).toBeDefined();
+  });
 });

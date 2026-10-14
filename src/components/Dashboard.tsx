@@ -160,12 +160,12 @@ export const Dashboard = ({
             className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100"
           >
             {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            Import PDF
+            Import PDF / LaTeX
           </button>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf"
+            accept=".pdf,.tex,.zip"
             className="hidden"
             onChange={handleFileChange}
           />

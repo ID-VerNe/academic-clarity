@@ -27,7 +27,10 @@ interface ReaderProps {
 }
 
 export const Reader = ({ doc, onBack, tableStyle }: ReaderProps) => {
-  const [viewMode, setViewMode] = useState<'split' | 'pdf' | 'markdown'>('split');
+  // .tex/.zip 文档没有 PDF 视图（server 对 /pdf 端点返回 404），默认纯 Markdown
+  const [viewMode, setViewMode] = useState<'split' | 'pdf' | 'markdown'>(
+    /\.(tex|zip)$/i.test(doc.filename) ? 'markdown' : 'split'
+  );
   const [chatQuery, setChatQuery] = useState('');
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string}[]>([]);
   const [isTyping, setIsTyping] = useState(false);
