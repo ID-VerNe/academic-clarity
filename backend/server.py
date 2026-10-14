@@ -447,6 +447,36 @@ async def reprocess_document(doc_id: int, priority: str = "normal"):
 
     return {"success": True}
 
+@app.post("/documents/{doc_id}/doi/verify")
+async def verify_document_doi(doc_id: int):
+    doc = state.db.get_document(doc_id)
+    if not doc or not doc.get('ocr_markdown'):
+        raise HTTPException(status_code=400)
+    try:
+        from services.doi_service import verify_document
+        result = verify_document(state.db, doc_id)      # 同步纯网络，~秒级
+        await ws_manager.send_document_update("updated", doc_id, state.db.get_document(doc_id))
+        return {"success": True, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/documents/{doc_id}/bibtex")
+async def get_document_bibtex(doc_id: int):
+    doc = state.db.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404)
+    if doc.get("bibtex"):
+        return {"bibtex": doc["bibtex"]}      # DB 缓存优先
+    if not doc.get("doi"):
+        raise HTTPException(status_code=400, detail="no verified doi")
+    try:
+        from services.doi_service import fetch_bibtex, DoiServiceError
+        bib = fetch_bibtex(doc["doi"], state.db)
+        state.db.update_document_doi(doc_id, bibtex=bib)        # 缓存，避免重复请求
+        return {"bibtex": bib}
+    except DoiServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
 @app.post("/chat")
 async def chat_with_doc(request: ChatRequest):
     doc = state.db.get_document(request.doc_id)

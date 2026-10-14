@@ -171,6 +171,13 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         except Exception as e:
             print(f"[TaskHub] Metadata Stage Error: {e}")
 
+        # Phase 1: CrossRef DOI 权威校验（失败不阻断主流水线，降级 unverified）
+        try:
+            from services.doi_service import verify_document
+            verify_document(db, doc_id)
+        except Exception as e:
+            print(f"[TaskHub] DOI Verify skipped: {e}")
+
         if failed_pages:
             status_note = f" (Partial: {len(failed_pages)} pages failed: {failed_pages})"
             print(f"[TaskHub] Pipeline completed with failures: {status_note}")
