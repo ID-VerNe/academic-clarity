@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 import unittest
 import uuid
 import shutil
@@ -58,6 +59,44 @@ class TestWorkspaceSync(unittest.TestCase):
         self.service.scan_and_sync() # 第一次
         results = self.service.scan_and_sync() # 第二次
         
+        self.assertEqual(len(results), 0)
+        docs = self.db.get_all_documents()
+        self.assertEqual(len(docs), 1)
+
+    def test_async_scan_new_pdfs(self):
+        """测试异步扫描功能能正确检测新增的PDF"""
+        file1 = os.path.join(self.test_dir, "async_paper1.pdf")
+        file2 = os.path.join(self.test_dir, "async_paper2.pdf")
+        with open(file1, "w") as f: f.write("%PDF-1.4 mock content")
+        with open(file2, "w") as f: f.write("%PDF-1.4 mock content")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            results = loop.run_until_complete(self.service.async_scan_and_sync())
+        finally:
+            loop.close()
+
+        self.assertEqual(len(results), 2)
+        docs = self.db.get_all_documents()
+        self.assertEqual(len(docs), 2)
+        filenames = [d['filename'] for d in docs]
+        self.assertIn("async_paper1.pdf", filenames)
+        self.assertIn("async_paper2.pdf", filenames)
+
+    def test_async_idempotent_sync(self):
+        """测试异步扫描的幂等性 - 重复调用不会创建重复记录"""
+        file1 = os.path.join(self.test_dir, "async_idempotent.pdf")
+        with open(file1, "w") as f: f.write("%PDF-1.4 mock content")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self.service.async_scan_and_sync())
+            results = loop.run_until_complete(self.service.async_scan_and_sync())
+        finally:
+            loop.close()
+
         self.assertEqual(len(results), 0)
         docs = self.db.get_all_documents()
         self.assertEqual(len(docs), 1)

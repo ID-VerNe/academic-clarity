@@ -88,12 +88,12 @@ class TestEdgeCases(unittest.TestCase):
                 self.assertIn("error", data)
                 self.assertEqual(data["error"], "Model returned invalid JSON")
                 
-                # Case 2: Timeout
+                # Case 2: Generic exception (e.g. connection error)
                 mock_comp.side_effect = Exception("Connection Timeout")
                 res = await call_json_extraction_api("content", api_config, "prompt")
                 data = json.loads(res)
                 self.assertIn("error", data)
-                self.assertEqual(data["error"], "Model returned invalid JSON")
+                self.assertEqual(data["error"], "Extraction failed")
 
         asyncio.run(run_test())
 

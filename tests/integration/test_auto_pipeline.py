@@ -42,7 +42,7 @@ class TestAutoPipeline(unittest.TestCase):
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir, ignore_errors=True)
 
-    @patch('services.workspace_service.run_full_ocr_workflow')
+    @patch('services.ocr_service.run_full_ocr_workflow')
     def test_sync_automatically_triggers_ocr(self, mock_ocr_workflow):
         """
         验证切换工作区后，扫描到的新文件能自动触发 OCR 任务挂载。
