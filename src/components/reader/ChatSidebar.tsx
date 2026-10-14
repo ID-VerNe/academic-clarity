@@ -139,7 +139,7 @@ export const ChatSidebar = ({
 
             <div className="space-y-4">
               {metadataList.map((meta) => (
-                <MetadataPanel key={meta.id} data={meta.content_json} label={meta.label} />
+                <MetadataPanel key={meta.id} data={meta.content_json} label={meta.label} docId={docId} onVerified={fetchMetadata} />
               ))}
               {metadataList.length === 0 && !isExtracting && (
                 <div className="py-10 text-center opacity-30">

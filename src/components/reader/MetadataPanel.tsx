@@ -1,6 +1,8 @@
 import React from 'react';
-import { Sparkles, Info, Tag, Calendar, User, FileText, ChevronDown, ChevronRight } from 'lucide-react';
+import { Sparkles, Info, Tag, Calendar, User, FileText, ChevronDown, ChevronRight, ShieldCheck, ClipboardCopy, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { api } from '../../api/client';
+import { DoiVerification } from '../../types';
 
 interface MetadataNodeProps {
   label: string;
@@ -95,15 +97,58 @@ const MetadataNode = ({ label, value, depth }: MetadataNodeProps) => {
 interface MetadataPanelProps {
   data?: string;
   label?: string;
+  docId?: number;
+  onVerified?: () => void;
   key?: React.Key;
 }
 
-export const MetadataPanel = ({ data, label }: MetadataPanelProps) => {
+const DOI_STATUS_STYLE: Record<string, string> = {
+  verified: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+  corrected: 'bg-amber-50 text-amber-700 border-amber-100',
+  mismatch: 'bg-rose-50 text-rose-700 border-rose-100',
+  unverified: 'bg-slate-100 text-slate-500 border-slate-200',
+};
+
+export const MetadataPanel = ({ data, label, docId, onVerified }: MetadataPanelProps) => {
+  const [verifying, setVerifying] = React.useState(false);
+  const [verifyResult, setVerifyResult] = React.useState<DoiVerification | null>(null);
+  const [copyNote, setCopyNote] = React.useState<string | null>(null);
+
   let metadata: any = null;
   
   try {
     if (data) metadata = JSON.parse(data);
   } catch (e) { console.error("JSON Parse Error", e); }
+
+  const handleVerifyDoi = async () => {
+    if (!docId) return;
+    setVerifying(true);
+    try {
+      const res = await api.verifyDoi(docId);
+      setVerifyResult(res.result || null);
+      onVerified?.();
+    } catch (e) {
+      setVerifyResult({ status: 'unverified', doi: null, score: 0, source: 'unverified', note: 'network error' });
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleCopyBibtex = async () => {
+    if (!docId) return;
+    setCopyNote(null);
+    try {
+      const res = await api.getBibtex(docId);
+      if (res.bibtex) {
+        await navigator.clipboard.writeText(res.bibtex);
+        setCopyNote('BibTeX copied');
+      } else {
+        setCopyNote('No BibTeX available');
+      }
+    } catch (e) {
+      setCopyNote('Copy failed');
+    }
+  };
 
   if (!metadata || Object.keys(metadata).length === 0) {
     return (
@@ -113,12 +158,42 @@ export const MetadataPanel = ({ data, label }: MetadataPanelProps) => {
     );
   }
 
+  const showDoiTools = label === 'Basic Insight' && !!docId && !!metadata.doi;
+
   return (
     <div className="space-y-2 mb-6">
       <div className="flex items-center gap-2 text-indigo-600 mb-3 px-2 border-b border-indigo-50 pb-2">
         <Sparkles className="w-3.5 h-3.5" />
         <h4 className="text-[10px] font-black uppercase tracking-[0.2em] truncate">{label || 'Insight'}</h4>
       </div>
+
+      {showDoiTools && (
+        <div className="px-1 mb-3 flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleVerifyDoi}
+            disabled={verifying}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-colors disabled:opacity-50"
+          >
+            {verifying ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
+            验证 DOI
+          </button>
+          <button
+            onClick={handleCopyBibtex}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-colors"
+          >
+            <ClipboardCopy className="w-3 h-3" />
+            复制 BibTeX
+          </button>
+          {verifyResult && (
+            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${DOI_STATUS_STYLE[verifyResult.status] || DOI_STATUS_STYLE.unverified}`}>
+              {verifyResult.status} · {verifyResult.source}
+            </span>
+          )}
+          {copyNote && (
+            <span className="text-[9px] font-bold text-slate-400">{copyNote}</span>
+          )}
+        </div>
+      )}
       
       <div className="px-1">
         {Object.entries(metadata).map(([key, value]) => (

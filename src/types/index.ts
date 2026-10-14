@@ -22,7 +22,20 @@ export interface Document {
   ocr_structured_json?: OCRStructuredContent;
   metadata_json?: string;
   basic_insight_json?: string; // 聚合的 Basic Insight
+  doi?: string | null;
+  doi_source?: 'llm' | 'crossref' | 'unverified' | null;
+  bibtex?: string | null;
   added_at: string;
+}
+
+export interface DoiVerification {
+  status: 'verified' | 'corrected' | 'mismatch' | 'unverified';
+  doi: string | null;
+  score: number;
+  source: 'llm' | 'crossref' | 'unverified';
+  cr_author?: string | null;
+  cr_title?: string | null;
+  note?: string;
 }
 
 export interface AppConfig {
