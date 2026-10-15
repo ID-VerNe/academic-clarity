@@ -223,3 +223,32 @@ class FakeDb:
 
     def set_config(self, key, value):
         self.values[key] = value
+
+
+class FakeCrossrefClient:
+    """CrossRefClient 桩：返回预置 search_by_title 结果或抛错；记录调用参数。"""
+
+    def __init__(self, result=None, exc=None):
+        self.result = result
+        self.exc = exc
+        self.calls = []
+
+    def search_by_title(self, title, expected_author=None):
+        self.calls.append((title, expected_author))
+        if self.exc:
+            raise self.exc
+        return self.result
+
+
+def fake_completion_response(content):
+    """构造 openai SDK 风格的 mock 响应（choices[0].message.content = content）。
+
+    配合 patch('services.ai_service._make_client') 使用：
+        create = mock_make.return_value.chat.completions.create
+        create.return_value = fake_completion_response("...")
+    """
+    from unittest.mock import MagicMock
+    response = MagicMock()
+    response.choices = [MagicMock()]
+    response.choices[0].message.content = content
+    return response
