@@ -12,6 +12,9 @@ class OCRConfig:
     DEFAULT_TPM_LIMIT = 100000
     DEFAULT_MAX_CONCURRENT = 5
     PAGE_RETRY_BACKOFF = [1, 2, 4]
+    # LLM 采样参数（ocr 单页识别）
+    DEFAULT_TEMPERATURE = 0
+    DEFAULT_MAX_TOKENS = 4000
 
 # ==== Task Manager ====
 class TaskConfig:
@@ -32,6 +35,16 @@ class APIConfig:
 class MetadataConfig:
     DEFAULT_LABEL = "Basic Insight"
     REQUIRED_FIELDS = ["title", "authors", "abstract"]
+
+# ==== File Types ====
+class FileConfig:
+    SUPPORTED_EXTS = (".pdf", ".tex", ".zip")
+
+# ==== DOI / CrossRef ====
+class DoiConfig:
+    # 礼貌池 UA 模板（mailto 为空时仍可用）
+    USER_AGENT_TEMPLATE = "AcademicClarity/1.0 (mailto:{mailto})"
+    REQUEST_DELAY = 0.35
 
 # ==== TeX Ingestion ====
 class TexConfig:
@@ -65,6 +78,9 @@ class LoggingConfig:
     LOG_DIR = "logs"
     MAX_LOG_SIZE = 10 * 1024 * 1024
     BACKUP_COUNT = 5
+    # 错误日志单独轮转参数（次级）
+    ERROR_LOG_SIZE = 5 * 1024 * 1024
+    ERROR_BACKUP_COUNT = 3
     JSON_FORMAT = True
     LOG_LEVEL = "INFO"
 
