@@ -78,6 +78,24 @@ class Database:
                 "bibtex": "TEXT",
             })
 
+            # Phase 3：提取维度定义（label UNIQUE；id 为稳定键，label 可改名）
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS extraction_dimensions (
+                    id TEXT PRIMARY KEY,
+                    label TEXT UNIQUE NOT NULL,
+                    prompt TEXT NOT NULL,
+                    system_prompt TEXT DEFAULT '',
+                    enabled INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # Phase 3：metadata 行关联维度（可空，旧行 NULL；Basic Insight 不填）
+            self._ensure_columns(cursor, "document_metadata", {
+                "dimension_id": "TEXT",
+            })
+
     def _ensure_columns(self, cursor, table: str, columns: dict) -> None:
         """幂等加列（Phase 1 迁移）：已存在则跳过；只加列不删不改类型。"""
         cursor.execute(f"PRAGMA table_info({table})")
@@ -86,10 +104,10 @@ class Database:
             if name not in existing:
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
-    def add_document_metadata(self, doc_id, label, content_json):
+    def add_document_metadata(self, doc_id, label, content_json, dimension_id=None):
         with self.safe_write() as cursor:
-            cursor.execute('INSERT INTO document_metadata (doc_id, label, content_json) VALUES (?, ?, ?)',
-                         (doc_id, label, content_json))
+            cursor.execute('INSERT INTO document_metadata (doc_id, label, content_json, dimension_id) VALUES (?, ?, ?, ?)',
+                         (doc_id, label, content_json, dimension_id))
             return cursor.lastrowid
 
     def get_document_metadata(self, doc_id):
@@ -102,6 +120,12 @@ class Database:
     def delete_metadata(self, metadata_id):
         with self.safe_write() as cursor:
             cursor.execute('DELETE FROM document_metadata WHERE id = ?', (metadata_id,))
+
+    def delete_metadata_by_dimension(self, doc_id, dimension_id):
+        """Phase 3：force 重跑前清理该文档该维度的旧结果。"""
+        with self.safe_write() as cursor:
+            cursor.execute('DELETE FROM document_metadata WHERE doc_id = ? AND dimension_id = ?',
+                           (doc_id, dimension_id))
 
     def update_document_doi(self, doc_id, doi=None, doi_source=None, bibtex=None):
         """Phase 1：动态 SET 写入 doi/doi_source/bibtex（仿 update_document_ocr）。"""

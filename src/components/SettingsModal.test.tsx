@@ -1,8 +1,22 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SettingsModal } from './SettingsModal';
 import { vi, describe, it, expect } from 'vitest';
 import React from 'react';
 import { AppConfig } from '../types';
+
+// api mock：SettingsModal 自身（多 key 统计）+ DimensionManager（维度列表）
+vi.mock('../api/client', () => ({
+  api: {
+    getMultiKeyStats: vi.fn().mockResolvedValue({ ocr: { enabled: false, keys: [] }, llm: { enabled: false, keys: [] } }),
+    updateOcrKeys: vi.fn(),
+    updateLlmKeys: vi.fn(),
+    getDimensions: vi.fn().mockResolvedValue({ dimensions: [] }),
+    saveDimension: vi.fn(),
+    deleteDimension: vi.fn(),
+    runBatch: vi.fn(),
+    exportDimension: vi.fn(),
+  }
+}));
 
 describe('SettingsModal Component', () => {
   const mockConfig: AppConfig = {
@@ -76,5 +90,27 @@ describe('SettingsModal Component', () => {
     const closeBtns = screen.getAllByRole('button');
     fireEvent.click(closeBtns[0]); 
     expect(mockHandlers.onClose).toHaveBeenCalled();
+  });
+
+  it('switches to Dimensions tab and mounts DimensionManager (empty state)', async () => {
+    render(
+      <SettingsModal 
+        isOpen={true} 
+        config={mockConfig} 
+        onClose={mockHandlers.onClose}
+        onSaveConfig={mockHandlers.onSaveConfig}
+        onSelectWorkspace={mockHandlers.onSelectWorkspace}
+      />
+    );
+
+    // 默认在 Basic tab：DimensionManager 尚未挂载
+    expect(screen.queryByText('Extraction Dimensions')).toBeNull();
+
+    fireEvent.click(screen.getByText('Dimensions'));
+
+    // 挂载后拉取维度列表（mock 返回空数组）→ 空态
+    expect(await screen.findByText('Extraction Dimensions')).toBeDefined();
+    expect(screen.getByText('New Dimension')).toBeDefined();
+    expect(await screen.findByText('No dimensions yet')).toBeDefined();
   });
 });

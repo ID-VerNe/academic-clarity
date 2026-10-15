@@ -62,6 +62,24 @@ export interface KnowledgePaper {
   claim_count: number;
 }
 
+/** Phase 3：自定义提取维度（label UNIQUE，id 稳定键） */
+export interface ExtractionDimension {
+  id: string;
+  label: string;
+  prompt: string;
+  system_prompt?: string;
+  enabled: number | boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** Phase 3：批量提取入队结果 */
+export interface BatchRunResult {
+  success: boolean;
+  queued: number;
+  skipped: number;
+}
+
 export interface AppConfig {
   DEEPSEEK_API_KEY: string;
   API_BASE: string;

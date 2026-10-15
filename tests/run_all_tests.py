@@ -51,7 +51,7 @@ def run_frontend_tests(root_dir):
 def cleanup_temp_files(tests_root):
     """递归清理测试产生的临时文件"""
     prefixes = ["test_db_", "test_workspace_", "test_audit_", "test_ws_api_", "test_ws_tex",
-                "test_ws_doi", "test_ws_know", "test_ws_know_sec"]
+                "test_ws_doi", "test_ws_know", "test_ws_know_sec", "test_ws_ext"]
     for root, dirs, files in os.walk(tests_root):
         for item in dirs + files:
             if any(prefix in item for prefix in prefixes):
