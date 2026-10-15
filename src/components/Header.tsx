@@ -1,9 +1,11 @@
 import React from 'react';
 import { School, FolderOpen, Search, Settings } from 'lucide-react';
+import { View } from '../types';
+import { isImeEnter } from '../utils/keyboard';
 
 interface HeaderProps {
   workspacePath: string;
-  setView: (view: 'dashboard' | 'reader') => void;
+  setView: (view: View) => void;
   onOpenSettings: () => void;
   /** 全局检索词（与 Dashboard 共享，UX-02） */
   searchValue: string;
@@ -50,7 +52,7 @@ export const Header = ({
           value={searchValue}
           onChange={(e) => onSearchChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.nativeEvent.isComposing) onSearchSubmit();
+            if (isImeEnter(e)) onSearchSubmit();
           }}
           aria-label="搜索文献库"
           title="搜索文献库（回车定位到文献库）"

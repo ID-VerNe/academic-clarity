@@ -1,23 +1,34 @@
-"""knowledge_service — know 知识层适配层（Phase 2，≤200 行）：vendor
+"""knowledge_service — know 知识层适配层（Phase 2）：vendor
 （backend/vendor/know/）逐字禁改；Basic Insight → claims（evidence_quotes
 逐字引文优先）；两级锚定（T1 逐字 / T2 转述降级，锚永可解析）；幂等+
 重绑（补 know.ingest 不重绑缺口 R1）；busy_timeout + 单写锁。paper_id
 固定 'doc:{id}'（re-ingest 稳定；DOI 走 resolve_doi → unresolved_meta）。
 归档层在 knowledge_archive。
-"""
-import json, os, re, sys, threading
 
-# vendor/know 入 sys.path（平铺 import：import anchors，禁改 vendor）
-_VENDOR_KNOW = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "vendor", "know")
-if os.path.exists(_VENDOR_KNOW) and _VENDOR_KNOW not in sys.path:
-    sys.path.insert(0, _VENDOR_KNOW)
-import anchors, config as know_config, identity as know_identity  # noqa: E402
+实现拆分至：knowledge_store（基础设施/连接）、knowledge_queries（检索）；
+本模块保留 ingest_document + 字段映射并 re-export 既有符号
+（init_store/_conn/_kb_path 等保持可导入）。
+"""
+import json
+import re
+
+from services.knowledge_archive import write_paper_page
+from services.knowledge_store import (KNOW_DB_NAME, _conn, _kb_path,  # noqa: F401
+                                      _read_conn, _write_conn, init_store)
+from services.knowledge_queries import (forget_paper, get_paper_claims,  # noqa: F401
+                                        list_papers, search)
+
+import anchors  # noqa: E402  vendor（sys.path 由 knowledge_store 注入）
+import config as know_config  # noqa: E402
+import identity as know_identity  # noqa: E402
 from derive import (_paragraphs_with_path, _resolve_anchor,  # noqa: E402
                     _resolve_heading_path)
-from services.knowledge_archive import write_paper_page, remove_paper_page  # noqa: E402
 
-KNOW_DB_NAME = "index.sqlite"     # {workspace}/knowledge/index.sqlite
+try:
+    from backend.constants import MetadataConfig
+except ImportError:
+    from constants import MetadataConfig
+
 PROMPT_ID_PARA = "basic-insight-v1"          # T1 段落级（逐字）
 PROMPT_ID_SECT = "basic-insight-v1~section"  # T2 章节级（转述降级）
 OCR_VERSION, _MODEL = "deepseek-ocr-v1", "academic-clarity"
@@ -28,27 +39,6 @@ _FIELD_MAP = [("title", "basic_insight.title"), ("authors", "basic_insight.autho
               ("abstract", "basic_insight.abstract"), ("keywords", "basic_insight.keywords"),
               ("summary", "basic_insight.summary")]
 
-_write_lock = threading.Lock()    # knowledge DB 单写者
-_PAPER_ID_RE = re.compile(r"^doc:(\d+)$")
-_WORKSPACE = None                 # init_store 记录；_kb_path 据此定位
-
-def init_store(workspace_path: str) -> None:
-    """lifespan/workspace 切换时调用：建 {workspace}/knowledge/ + init_db。"""
-    global _WORKSPACE
-    _WORKSPACE = workspace_path
-    os.makedirs(_kb_path(), exist_ok=True)
-    _conn().close()
-
-def _kb_path() -> str:
-    if not _WORKSPACE:
-        raise RuntimeError("knowledge_store not initialized (call init_store)")
-    return os.path.join(_WORKSPACE, "knowledge")
-
-def _conn():
-    """vendor init_db（幂等建表）+ busy_timeout（vendor 未设，防锁）。"""
-    conn = know_config.init_db(os.path.join(_kb_path(), KNOW_DB_NAME))
-    conn.execute("PRAGMA busy_timeout=30000")
-    return conn
 
 def _paper_meta(doc: dict, insight: dict, doi: str, status: str) -> dict:
     """papers 行（键与 insert_paper 参数同构；title: documents→insight→filename）。"""
@@ -63,6 +53,7 @@ def _paper_meta(doc: dict, insight: dict, doi: str, status: str) -> dict:
             "project": "academic-clarity", "source_rel": doc.get("filename") or "",
             "ocr_version": OCR_VERSION, "doi": doi, "identity_status": status}
 
+
 def _t2_anchor(paras_with_path):
     """T2 兜底：heading_path 含 abstract/摘要 的首段，否则文档首段。"""
     for para, path in paras_with_path:
@@ -70,8 +61,10 @@ def _t2_anchor(paras_with_path):
             return para, path or ""
     return paras_with_path[0] if paras_with_path else ("", "")
 
+
 def _skip(paper_id: str, reason: str) -> dict:
     return dict(paper_id=paper_id, claims=0, rebound=0, section_level=0, skipped_reason=reason)
+
 
 def ingest_document(doc_id: int, db) -> dict:
     """Basic Insight + ocr_markdown → claims（T1/T2）→ 知识库；锚永可解析（T2 兜底）。"""
@@ -81,13 +74,12 @@ def ingest_document(doc_id: int, db) -> dict:
     paras = anchors.paragraphize(doc.get("ocr_markdown") or "")
     if not paras:
         return _skip(f"doc:{doc_id}", "no_paragraphs")
-    row = next((m for m in db.get_document_metadata(doc_id) if m["label"] == "Basic Insight"), None)
-    if not row:
-        return _skip(f"doc:{doc_id}", "no_basic_insight")
-    try:
-        insight = json.loads(row["content_json"])
-    except (json.JSONDecodeError, TypeError):
-        return _skip(f"doc:{doc_id}", "bad_insight_json")
+    insight = db.get_basic_insight(doc_id)          # B-DRY-12/13：label + JSON 容错
+    if insight is None:
+        # 保留 skip reason 区分：有行但 JSON 损坏 → bad_insight_json；无行 → no_basic_insight
+        has_row = any(m.get("label") == MetadataConfig.DEFAULT_LABEL
+                      for m in db.get_document_metadata(doc_id))
+        return _skip(f"doc:{doc_id}", "bad_insight_json" if has_row else "no_basic_insight")
     paras_with_path = _paragraphs_with_path(doc["ocr_markdown"])
     path_by_para = {p: path for p, path in paras_with_path}
     meta = _paper_meta(doc, insight, *know_identity.resolve_doi({}, insight.get("doi") or ""))
@@ -112,89 +104,24 @@ def ingest_document(doc_id: int, db) -> dict:
             section_level += 1
         claims.append({"concept": concept, "quote": quote, "anchor": anchor,
                        "heading_path": heading or "", "prompt_id": prompt_id})
-    with _write_lock:                               # 单写锁
-        conn = _conn()
-        try:
-            know_config.insert_paper(conn, **meta)
-            existing = {(r[0], r[1]): (r[2], r[3]) for r in conn.execute(
-                "SELECT concept, quote, anchor, claim_id FROM claims "
-                "WHERE paper_id=?", (paper_id,)).fetchall()}
-            rebound = 0
-            for c in claims:                        # 幂等 insert + 锚漂移重绑
-                key = (c["concept"], c["quote"])
-                if key not in existing:
-                    know_config.insert_claim(
-                        conn, paper_id, c["concept"], c["quote"], c["anchor"],
-                        c["heading_path"], _MODEL, c["prompt_id"])
-                elif existing[key][0] != c["anchor"]:
-                    conn.execute("UPDATE claims SET anchor=?, heading_path=? "
-                                 "WHERE claim_id=?",
-                                 (c["anchor"], c["heading_path"], existing[key][1]))
-                    rebound += 1
-            conn.commit()
-        finally:
-            conn.close()
+    with _write_conn() as conn:                     # 单写锁（_write_conn 内含）
+        know_config.insert_paper(conn, **meta)
+        existing = {(r[0], r[1]): (r[2], r[3]) for r in conn.execute(
+            "SELECT concept, quote, anchor, claim_id FROM claims "
+            "WHERE paper_id=?", (paper_id,)).fetchall()}
+        rebound = 0
+        for c in claims:                            # 幂等 insert + 锚漂移重绑
+            key = (c["concept"], c["quote"])
+            if key not in existing:
+                know_config.insert_claim(
+                    conn, paper_id, c["concept"], c["quote"], c["anchor"],
+                    c["heading_path"], _MODEL, c["prompt_id"])
+            elif existing[key][0] != c["anchor"]:
+                conn.execute("UPDATE claims SET anchor=?, heading_path=? "
+                             "WHERE claim_id=?",
+                             (c["anchor"], c["heading_path"], existing[key][1]))
+                rebound += 1
+        conn.commit()
     write_paper_page(paper_id, meta, claims, rebound)
     return {"paper_id": paper_id, "claims": len(claims), "rebound": rebound,
             "section_level": section_level}
-
-def search(query: str, limit: int = 10) -> list:
-    """config.search_claims（FTS 双表 + LIKE 兜底）+ papers 回填。"""
-    if not (query or "").strip(): return []
-    conn = _conn()
-    try:
-        rows = know_config.search_claims(conn, query.strip(), limit=limit)
-        if rows:
-            pids = sorted({r["paper_id"] for r in rows})
-            papers = {r[0]: (r[1], r[2]) for r in conn.execute(
-                f"SELECT paper_id, title, doi FROM papers WHERE paper_id IN "
-                f"({','.join('?' * len(pids))})", pids).fetchall()}
-    finally:
-        conn.close()
-    return [{**r, "doc_id": int(m.group(1)) if (m := _PAPER_ID_RE.match(r["paper_id"] or "")) else None,
-             "title": papers.get(r["paper_id"], (None, None))[0],
-             "doi": papers.get(r["paper_id"], (None, None))[1]} for r in rows]
-
-def get_paper_claims(paper_id: str) -> list:
-    """单篇 claims（按 claim_id 升序）。"""
-    conn = _conn()
-    try:
-        rows = conn.execute("SELECT claim_id, concept, quote, anchor, heading_path, "
-                            "conflicting, prompt_id FROM claims WHERE paper_id=? ORDER BY claim_id",
-                            (paper_id,)).fetchall()
-    finally:
-        conn.close()
-    return [{"claim_id": r[0], "concept": r[1], "quote": r[2], "anchor": r[3],
-             "heading_path": r[4], "conflicting": r[5], "prompt_id": r[6]} for r in rows]
-
-
-def list_papers() -> list:
-    """papers + claim 计数（Dashboard 检索来源）。"""
-    conn = _conn()
-    try:
-        rows = conn.execute("SELECT p.paper_id, p.title, p.doi, p.identity_status, "
-                            "COUNT(c.claim_id) FROM papers p LEFT JOIN claims c "
-                            "ON c.paper_id = p.paper_id GROUP BY p.paper_id "
-                            "ORDER BY p.paper_id").fetchall()
-    finally:
-        conn.close()
-    return [{"paper_id": r[0], "title": r[1], "doi": r[2],
-             "identity_status": r[3], "claim_count": r[4]} for r in rows]
-
-def forget_paper(doc_id: int) -> bool:
-    """文档删除联动：删知识行（含 FTS）+ 归档页；知识库可重建。"""
-    paper_id = f"doc:{doc_id}"
-    with _write_lock:
-        conn = _conn()
-        try:
-            rids = [r[0] for r in conn.execute(
-                "SELECT claim_id FROM claims WHERE paper_id=?", (paper_id,))]
-            for tbl in ("claims_fts", "claims_fts_cjk"):
-                conn.executemany(f"DELETE FROM {tbl} WHERE rowid=?", [(r,) for r in rids])
-            conn.execute("DELETE FROM claims WHERE paper_id=?", (paper_id,))
-            conn.execute("DELETE FROM papers WHERE paper_id=?", (paper_id,))
-            conn.commit()
-        finally:
-            conn.close()
-    remove_paper_page(paper_id)
-    return True

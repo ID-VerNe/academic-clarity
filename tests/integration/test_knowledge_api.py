@@ -180,7 +180,7 @@ class TestKnowledgeApi(unittest.TestCase):
     def test_chat_quotes_mode_feeds_only_quotes(self):
         doc_id = self._add_doc()
         mock_chat = AsyncMock(return_value="基于引文的回答 [cite://1]")
-        with patch("server.call_chat_api", mock_chat):
+        with patch("routes.knowledge.call_chat_api", mock_chat):
             resp = self.client.post("/chat", json={
                 "doc_id": doc_id, "query": "交易瓶颈是什么？",
                 "quotes": ["P2P 交易瓶颈在于各 agent 需顺序更新账本。"],
@@ -196,7 +196,7 @@ class TestKnowledgeApi(unittest.TestCase):
     def test_chat_without_quotes_uses_full_markdown(self):
         doc_id = self._add_doc()
         mock_chat = AsyncMock(return_value="全文回答")
-        with patch("server.call_chat_api", mock_chat):
+        with patch("routes.knowledge.call_chat_api", mock_chat):
             resp = self.client.post(
                 "/chat", json={"doc_id": doc_id, "query": "综述什么？"})
         self.assertEqual(resp.status_code, 200)

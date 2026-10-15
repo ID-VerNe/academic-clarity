@@ -1,13 +1,16 @@
-import asyncio
-import os
-import time
-from datetime import datetime
-from typing import Dict, Optional
+"""
+Academic Clarity - 基础任务池（task_hub）
 
-try:
-    from backend.constants import TaskConfig
-except ImportError:
-    from constants import TaskConfig
+worker 池 + 入队去重（active/cancelled）+ 任务执行；重试调度与失败计数委托
+core.task_retry.TaskRetryTracker。与 core.priority_queue 的语义边界及合并
+前提见 core/README.md。
+"""
+import asyncio
+from typing import Dict
+
+from constants import TaskConfig
+from core.task_retry import TaskRetryTracker
+
 
 class TaskManager:
     def __init__(self, concurrency=None):
@@ -17,13 +20,17 @@ class TaskManager:
         self.concurrency = concurrency
         self.workers = []
         self.active_task_ids: set = set()
-        self.failed_task_ids: Dict[int, tuple] = {}
         # UX-26：取消支持——排队中标记跳过，运行中直接取消其 asyncio.Task
         self.cancelled_task_ids: set = set()
         self._running: Dict[int, asyncio.Task] = {}
         self._app_state = None
         self._cleanup_task = None
-        self._last_cleanup = time.time()
+        self.retry_tracker = TaskRetryTracker()
+
+    @property
+    def failed_task_ids(self) -> Dict[int, tuple]:
+        """失败记录视图（保持原 TaskManager.failed_task_ids 属性可读）"""
+        return self.retry_tracker.failed_task_ids
 
     async def start_workers(self, app_state):
         """启动指定数量的并行 Worker"""
@@ -41,29 +48,7 @@ class TaskManager:
         for i in range(self.concurrency):
             worker = asyncio.create_task(self._worker_loop(i, app_state))
             self.workers.append(worker)
-        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
-
-    def _cleanup_old_failures(self):
-        """清理过期的失败任务记录，防止内存无限增长"""
-        if len(self.failed_task_ids) <= TaskConfig.MAX_FAILED_TASKS:
-            return
-
-        sorted_tasks = sorted(
-            self.failed_task_ids.items(),
-            key=lambda x: x[1][1]
-        )
-
-        to_remove = len(self.failed_task_ids) - TaskConfig.MAX_FAILED_TASKS
-        for doc_id, _ in sorted_tasks[:to_remove]:
-            self.failed_task_ids.pop(doc_id, None)
-
-        print(f"[TaskHub] Cleaned up {to_remove} old failed task records")
-
-    async def _cleanup_loop(self):
-        """定期清理失败的记录"""
-        while True:
-            await asyncio.sleep(300)
-            self._cleanup_old_failures()
+        self._cleanup_task = asyncio.create_task(self.retry_tracker.cleanup_loop())
 
     async def add_task(self, doc_id, task_func, *args, force: bool = False):
         """向队尾添加任务
@@ -107,15 +92,6 @@ class TaskManager:
             return True
         return False
 
-    async def _schedule_retry(self, doc_id, task_func, args, retries):
-        """非阻塞方式调度重试，避免阻塞 worker"""
-        backoff = TaskConfig.RETRY_BACKOFF[retries] if retries < len(TaskConfig.RETRY_BACKOFF) else TaskConfig.RETRY_BACKOFF[-1]
-        print(f"[TaskHub] Scheduling retry {retries}/{TaskConfig.MAX_RETRIES} for Doc {doc_id} in {backoff}s (non-blocking)")
-        await asyncio.sleep(backoff)
-        self.failed_task_ids[doc_id] = (retries, time.time())
-        self._cleanup_old_failures()
-        await self.queue.put((doc_id, task_func, args, retries))
-
     async def _worker_loop(self, worker_id, app_state):
         """Worker 循环认领任务"""
         while True:
@@ -151,11 +127,11 @@ class TaskManager:
                 print(f"[Worker-{worker_id}] Task FAILED for Doc: {doc_id}. Error: {e}")
 
                 if retries < TaskConfig.MAX_RETRIES:
-                    asyncio.create_task(self._schedule_retry(doc_id, task_func, args, retries + 1))
+                    asyncio.create_task(self.retry_tracker.schedule_retry(
+                        doc_id, task_func, args, retries + 1, self.queue))
                 else:
                     self.active_task_ids.discard(doc_id)
-                    self.failed_task_ids[doc_id] = (retries, time.time())
-                    self._cleanup_old_failures()
+                    self.retry_tracker.record_failure(doc_id, retries)
                     print(f"[Worker-{worker_id}] Max retries reached for Doc: {doc_id}. Giving up.")
             finally:
                 self._running.pop(doc_id, None)
@@ -183,5 +159,6 @@ class TaskManager:
             worker.cancel()
         await asyncio.gather(*self.workers, return_exceptions=True)
         self.workers.clear()
+
 
 task_hub = TaskManager()

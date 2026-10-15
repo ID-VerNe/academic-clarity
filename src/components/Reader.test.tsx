@@ -7,6 +7,7 @@ import { api } from '../api/client';
 vi.mock('../api/client', () => ({
   api: {
     getPdfUrl: vi.fn().mockResolvedValue('http://example.com/test.pdf'),
+    getPdfBlob: vi.fn().mockResolvedValue(new Blob([])),
     chat: vi.fn(),
     searchKnowledge: vi.fn().mockResolvedValue({ results: [] }),
     getMetadata: vi.fn().mockResolvedValue([]),

@@ -83,8 +83,8 @@ class TestTexUploadFlow(unittest.TestCase):
             files={"file": (filename, content, "application/octet-stream")},
         )
 
-    @patch('server.run_full_ocr_workflow', new_callable=AsyncMock)
-    @patch('server.run_tex_workflow', new_callable=AsyncMock)
+    @patch('routes.documents.run_full_ocr_workflow', new_callable=AsyncMock)
+    @patch('routes.documents.run_tex_workflow', new_callable=AsyncMock)
     def test_upload_tex_routes_to_tex_workflow(self, mock_tex, mock_ocr):
         resp = self._upload("paper.tex", TEX_FIXTURE.encode("utf-8"))
         self.assertEqual(resp.status_code, 200)
@@ -97,8 +97,8 @@ class TestTexUploadFlow(unittest.TestCase):
         args = mock_tex.call_args[0]
         self.assertEqual(args[1], os.path.join(self.test_ws, "paper.tex"))
 
-    @patch('server.run_full_ocr_workflow', new_callable=AsyncMock)
-    @patch('server.run_tex_workflow', new_callable=AsyncMock)
+    @patch('routes.documents.run_full_ocr_workflow', new_callable=AsyncMock)
+    @patch('routes.documents.run_tex_workflow', new_callable=AsyncMock)
     def test_upload_zip_routes_to_tex_workflow(self, mock_tex, mock_ocr):
         import zipfile
         import io
@@ -115,8 +115,8 @@ class TestTexUploadFlow(unittest.TestCase):
             mock_tex.call_args[0][1], os.path.join(self.test_ws, "src.zip")
         )
 
-    @patch('server.run_full_ocr_workflow', new_callable=AsyncMock)
-    @patch('server.run_tex_workflow', new_callable=AsyncMock)
+    @patch('routes.documents.run_full_ocr_workflow', new_callable=AsyncMock)
+    @patch('routes.documents.run_tex_workflow', new_callable=AsyncMock)
     def test_upload_unsupported_ext_rejected(self, mock_tex, mock_ocr):
         resp = self._upload("evil.exe", b"MZ fake binary")
         self.assertEqual(resp.status_code, 400)
@@ -162,8 +162,8 @@ class TestTexUploadFlow(unittest.TestCase):
                             f"LLM input should carry title: {llm_md[:60]!r}")
             self.assertNotIn("Real Title", doc["ocr_markdown"])
 
-    @patch('server.run_full_ocr_workflow', new_callable=AsyncMock)
-    @patch('server.run_tex_workflow', new_callable=AsyncMock)
+    @patch('routes.documents.run_full_ocr_workflow', new_callable=AsyncMock)
+    @patch('routes.documents.run_tex_workflow', new_callable=AsyncMock)
     def test_workspace_sync_routes_tex(self, mock_tex, mock_ocr):
         tex_path = os.path.join(self.test_ws, "scanned.tex")
         with open(tex_path, "w", encoding="utf-8") as f:

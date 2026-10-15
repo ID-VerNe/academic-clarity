@@ -1,84 +1,37 @@
 """
-Academic Clarity - 优先级任务队列
-支持任务优先级、延迟执行、死信队列、重试策略
+Academic Clarity - 优先级任务队列（堆存储 / 延迟重试 / 按 doc 去重）
+
+- 任务模型见 priority_models.py
+- 死信存储见 dead_letter_store.py（threading.Lock，保持原语义）
+- worker 池见 priority_manager.py；本模块对 PriorityTaskManager /
+  priority_task_hub 做惰性 re-export（PEP 562），保持
+  `from core.priority_queue import ...` 冻结导入不变，并避免两个模块循环导入
 """
 import asyncio
-import time
 import heapq
-import uuid
-from typing import Dict, Optional, Callable, Any
-from dataclasses import dataclass, field
-from enum import IntEnum
+import time
+from typing import Dict, Optional, Callable
 from collections import defaultdict
-import threading
 
-try:
-    from backend.constants import TaskConfig
-except ImportError:
-    class TaskConfig:
-        DEFAULT_CONCURRENCY = 10
-        MAX_RETRIES = 3
-        RETRY_BACKOFF = [1, 5, 30]
-        MAX_FAILED_TASKS = 100
+from core.priority_models import TaskPriority, QueuedTask, DeadLetterEntry  # noqa: F401 (re-export)
+from core.dead_letter_store import DeadLetterStore
 
-class TaskPriority(IntEnum):
-    CRITICAL = 0
-    HIGH = 1
-    NORMAL = 2
-    LOW = 3
-    BACKGROUND = 4
+__all__ = [
+    "TaskPriority", "QueuedTask", "DeadLetterEntry",
+    "PriorityTaskQueue", "PriorityTaskManager", "priority_task_hub",
+]
 
-@dataclass
-class QueuedTask:
-    priority: int
-    doc_id: int
-    task_func: Callable
-    args: tuple
-    kwargs: dict
-    created_at: float = field(default_factory=time.time)
-    retry_count: int = 0
-    task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    scheduled_at: Optional[float] = None
-    metadata: Dict = field(default_factory=dict)
-
-    def __lt__(self, other: "QueuedTask") -> bool:
-        if self.scheduled_at and other.scheduled_at:
-            return (self.scheduled_at, self.priority) < (other.scheduled_at, other.priority)
-        elif self.scheduled_at:
-            return False
-        elif other.scheduled_at:
-            return True
-        return (self.priority, self.created_at) < (other.priority, other.created_at)
-
-    def can_retry(self, max_retries: int = TaskConfig.MAX_RETRIES) -> bool:
-        return self.retry_count < max_retries
-
-    def get_retry_delay(self) -> float:
-        backoff = TaskConfig.RETRY_BACKOFF
-        idx = min(self.retry_count, len(backoff) - 1)
-        return backoff[idx]
-
-    def is_ready(self) -> bool:
-        if self.scheduled_at is None:
-            return True
-        return time.time() >= self.scheduled_at
-
-@dataclass
-class DeadLetterEntry:
-    task: QueuedTask
-    error: str
-    failed_at: float
-    failure_count: int = 1
 
 class PriorityTaskQueue:
+    """优先级任务队列（asyncio.Lock 保护；延迟任务按 scheduled_at 排序）"""
+
     def __init__(self):
         self._heap: list = []
         self._tasks_by_id: Dict[str, QueuedTask] = {}
         self._tasks_by_doc_id: Dict[int, str] = {}
         self._lock = asyncio.Lock()
         self._event = asyncio.Event()
-        self._dead_letters: Dict[str, DeadLetterEntry] = {}
-        self._dead_letter_lock = threading.Lock()
+        self._dead_letters = DeadLetterStore()
 
     async def enqueue(self, task: QueuedTask) -> str:
         async with self._lock:
@@ -163,43 +116,19 @@ class PriorityTaskQueue:
                 return True
         return False
 
+    # ── 死信（委托 DeadLetterStore；threading.Lock 语义不变） ──
+
     def move_to_dead_letter(self, task: QueuedTask, error: str):
-        with self._dead_letter_lock:
-            if task.task_id in self._dead_letters:
-                entry = self._dead_letters[task.task_id]
-                entry.failure_count += 1
-                entry.error = error
-                entry.failed_at = time.time()
-            else:
-                self._dead_letters[task.task_id] = DeadLetterEntry(task, error, time.time())
+        self._dead_letters.move(task, error)
 
     def get_dead_letters(self) -> Dict[str, Dict]:
-        with self._dead_letter_lock:
-            return {
-                task_id: {
-                    "task_id": entry.task.task_id,
-                    "doc_id": entry.task.doc_id,
-                    "priority": entry.task.priority,
-                    "retry_count": entry.task.retry_count,
-                    "error": entry.error,
-                    "failed_at": entry.failed_at,
-                    "failure_count": entry.failure_count
-                }
-                for task_id, entry in self._dead_letters.items()
-            }
+        return self._dead_letters.get_all()
 
     def clear_dead_letters(self):
-        with self._dead_letter_lock:
-            self._dead_letters.clear()
+        self._dead_letters.clear()
 
     def retry_dead_letter(self, task_id: str) -> Optional[QueuedTask]:
-        with self._dead_letter_lock:
-            if task_id in self._dead_letters:
-                entry = self._dead_letters.pop(task_id)
-                entry.task.retry_count = 0
-                entry.task.scheduled_at = None
-                return entry.task
-        return None
+        return self._dead_letters.pop_for_retry(task_id)
 
     async def wait_for_task(self, timeout: Optional[float] = None) -> Optional[QueuedTask]:
         while True:
@@ -232,11 +161,8 @@ class PriorityTaskQueue:
 
         for task in self._tasks_by_id.values():
             priority_counts[task.priority] += 1
-            if task.scheduled_at:
-                if task.scheduled_at <= now:
-                    ready_count += 1
-                else:
-                    delayed_count += 1
+            if task.scheduled_at and task.scheduled_at > now:
+                delayed_count += 1
             else:
                 ready_count += 1
 
@@ -245,95 +171,16 @@ class PriorityTaskQueue:
             "ready_tasks": ready_count,
             "delayed_tasks": delayed_count,
             "priority_distribution": dict(priority_counts),
-            "dead_letters": len(self._dead_letters)
+            "dead_letters": self._dead_letters.count()
         }
 
-class PriorityTaskManager:
-    def __init__(self, concurrency: Optional[int] = None):
-        if concurrency is None:
-            concurrency = TaskConfig.DEFAULT_CONCURRENCY
 
-        self.queue = PriorityTaskQueue()
-        self.concurrency = concurrency
-        self.workers: list = []
-        self._app_state = None
-        self._running = False
-        self._active_task_ids: Dict[int, str] = {}
-        self._worker_stats: Dict[int, Dict] = defaultdict(lambda: {"tasks": 0, "errors": 0})
-
-    async def start(self, app_state):
-        self._app_state = app_state
-        self._running = True
-
-        for i in range(self.concurrency):
-            worker = asyncio.create_task(self._worker_loop(i))
-            self.workers.append(worker)
-
-        print(f"[PriorityTaskHub] Started {self.concurrency} workers")
-
-    async def stop(self):
-        self._running = False
-        for worker in self.workers:
-            worker.cancel()
-        await asyncio.gather(*self.workers, return_exceptions=True)
-        self.workers.clear()
-        print("[PriorityTaskHub] Stopped")
-
-    async def add_task(self, doc_id: int, task_func: Callable, *args,
-                      priority: TaskPriority = TaskPriority.NORMAL,
-                      force: bool = False, **kwargs) -> Optional[str]:
-        if not force and doc_id in self._active_task_ids:
-            print(f"[PriorityTaskHub] Doc {doc_id} already processing, skipping")
-            return None
-
-        task = QueuedTask(
-            priority=priority.value,
-            doc_id=doc_id,
-            task_func=task_func,
-            args=args,
-            kwargs=kwargs
-        )
-
-        if force:
-            await self.queue.cancel_by_doc_id(doc_id)
-
-        self._active_task_ids[doc_id] = task.task_id
-        return await self.queue.enqueue(task)
-
-    async def _worker_loop(self, worker_id: int):
-        while self._running:
-            task = await self.queue.wait_for_task(timeout=1.0)
-
-            if task is None:
-                continue
-
-            print(f"[Worker-{worker_id}] Processing Doc {task.doc_id} (Priority: {TaskPriority(task.priority).name})")
-            start_time = time.time()
-
-            try:
-                await task.task_func(task.doc_id, *task.args, db=self._app_state.db, **task.kwargs)
-                self._worker_stats[worker_id]["tasks"] += 1
-                print(f"[Worker-{worker_id}] Completed Doc {task.doc_id} in {time.time() - start_time:.2f}s")
-
-            except Exception as e:
-                self._worker_stats[worker_id]["errors"] += 1
-                error_msg = str(e)
-
-                if task.can_retry():
-                    print(f"[Worker-{worker_id}] Retrying Doc {task.doc_id} ({task.retry_count}/{TaskConfig.MAX_RETRIES}): {error_msg}")
-                    await self.queue.requeue_with_delay(task)
-                else:
-                    print(f"[Worker-{worker_id}] Max retries reached for Doc {task.doc_id}: {error_msg}")
-                    self.queue.move_to_dead_letter(task, error_msg)
-            finally:
-                if self._active_task_ids.get(task.doc_id) == task.task_id:
-                    self._active_task_ids.pop(task.doc_id, None)
-
-    def get_stats(self) -> Dict:
+def __getattr__(name: str):
+    """惰性 re-export worker 管理器（避免与 priority_manager 循环导入）"""
+    if name in ("PriorityTaskManager", "priority_task_hub"):
+        from core.priority_manager import PriorityTaskManager, priority_task_hub
         return {
-            "queue_stats": self.queue.get_stats(),
-            "active_tasks": len(self._active_task_ids),
-            "worker_stats": dict(self._worker_stats)
-        }
-
-priority_task_hub = PriorityTaskManager()
+            "PriorityTaskManager": PriorityTaskManager,
+            "priority_task_hub": priority_task_hub,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

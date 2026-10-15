@@ -2,20 +2,15 @@
 Academic Clarity - 统一日志系统
 提供结构化日志、多个日志级别、按模块分类输出
 """
-import os
 import sys
 import logging
 import json
-import time
-from datetime import datetime
-from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
-from typing import Optional, Dict, Any
+from logging.handlers import RotatingFileHandler
+from typing import Optional, Dict
 from pathlib import Path
 
-try:
-    from backend.constants import ServerConfig
-except ImportError:
-    from constants import ServerConfig
+from constants import LoggingConfig
+from .time_utils import utc_now_iso
 
 class JSONFormatter(logging.Formatter):
     """JSON格式日志格式化器"""
@@ -24,7 +19,7 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": utc_now_iso(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -85,8 +80,8 @@ class StructuredLogger:
 
         file_handler = RotatingFileHandler(
             log_path / f"{self.name}.log",
-            maxBytes=10 * 1024 * 1024,
-            backupCount=5,
+            maxBytes=LoggingConfig.MAX_LOG_SIZE,
+            backupCount=LoggingConfig.BACKUP_COUNT,
             encoding="utf-8"
         )
         file_handler.setLevel(logging.DEBUG)
@@ -95,8 +90,8 @@ class StructuredLogger:
 
         error_handler = RotatingFileHandler(
             log_path / f"{self.name}_error.log",
-            maxBytes=5 * 1024 * 1024,
-            backupCount=3,
+            maxBytes=LoggingConfig.ERROR_LOG_SIZE,
+            backupCount=LoggingConfig.ERROR_BACKUP_COUNT,
             encoding="utf-8"
         )
         error_handler.setLevel(logging.ERROR)

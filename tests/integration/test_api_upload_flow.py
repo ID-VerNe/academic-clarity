@@ -50,7 +50,7 @@ class TestApiUploadFlow(unittest.TestCase):
                 return
             time.sleep(0.1)
 
-    @patch('server.run_full_ocr_workflow')
+    @patch('routes.documents.run_full_ocr_workflow')
     def test_upload_api_logic(self, mock_ocr):
         """
         验证上传 API 是否正确保存文件并投递后台任务。
@@ -80,7 +80,7 @@ class TestApiUploadFlow(unittest.TestCase):
         # 创建一个空文件
         with open(os.path.join(self.test_ws, "retry.pdf"), "w") as f: f.write("m")
 
-        with patch('server.run_full_ocr_workflow') as mock_ocr:
+        with patch('routes.documents.run_full_ocr_workflow') as mock_ocr:
             response = self.client.post(f"/documents/{doc_id}/reprocess")
             self.assertEqual(response.status_code, 200)
             self._wait_for_call(mock_ocr)

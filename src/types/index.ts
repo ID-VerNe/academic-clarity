@@ -1,5 +1,14 @@
 export type View = 'dashboard' | 'reader';
 
+/** Reader 三栏布局模式（Reader / ReaderToolbar 共用） */
+export type ViewMode = 'split' | 'pdf' | 'markdown';
+
+/** 阅读器会话消息（Reader 持久化 / ChatSidebar 渲染共用） */
+export interface ChatMessage {
+  role: 'user' | 'ai';
+  content: string;
+}
+
 export type OCRStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
 export interface OCRStructuredBlock {
@@ -26,6 +35,10 @@ export interface Document {
   doi_source?: 'llm' | 'crossref' | 'unverified' | null;
   bibtex?: string | null;
   added_at: string;
+  /** 以下字段来自后端 documents 表（database.py CREATE TABLE / _ensure_columns），GET /documents 一并返回 */
+  original_path?: string | null;
+  stored_path?: string | null;
+  ocr_raw?: string | null;
   /** 仅 /tasks 返回：流水线当前阶段快照（UX-26） */
   stage?: string;
   progress?: number;
@@ -55,15 +68,6 @@ export interface KnowledgeClaim {
   doc_id?: number | null;  // search 端点回填（claims 表本身不存 doc_id）
   title?: string | null;   // search 端点回填论文标题
   doi?: string | null;     // search 端点回填
-}
-
-/** know 知识层：一篇论文的 claim 汇总（GET /knowledge/papers） */
-export interface KnowledgePaper {
-  paper_id: string;      // 固定 doc:{doc_id}
-  title: string | null;
-  doi: string | null;
-  identity_status: string;
-  claim_count: number;
 }
 
 /** Phase 3：自定义提取维度（label UNIQUE，id 稳定键） */

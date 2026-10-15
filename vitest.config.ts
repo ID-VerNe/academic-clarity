@@ -28,6 +28,10 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/tests/setup.ts'],
+    // 全量套件与 8 路 Python 测试并发时 CPU 争抢会让交互型用例触碰默认 5s 上限
+    // （实测 4 个用例假超时、单独跑 14s 全绿）——放宽到 20s：仍能抓住真挂死，
+    // 不再拿时钟赛跑当门禁（与 run_all_tests.py 的 600s 超时策略一致）。
+    testTimeout: 20000,
     alias: {
       '@': path.resolve(canonicalRoot, 'src'),
     },
