@@ -76,11 +76,16 @@ class TestExtractionRealLlmE2E(unittest.TestCase):
         os.makedirs(self.ws)
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
+        # server 输出落盘而非 PIPE：未读 PIPE 写满后子进程阻塞在日志写入上；
+        # 且失败时日志可用于诊断。
+        self.log_path = os.path.join(self.ws, "server.log")
+        self.log_f = open(self.log_path, "w", encoding="utf-8", errors="replace")
         self.proc = subprocess.Popen(
             [os.path.join(ROOT_DIR, "python_embed", "python.exe"),
              os.path.join("backend", "server.py"), str(self.port), self.ws],
             cwd=ROOT_DIR,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdout=self.log_f, stderr=subprocess.STDOUT,
+            env=dict(os.environ, PYTHONUNBUFFERED="1"),
         )
         self._wait_health()
         self._post_json("/configs", None, params=[
@@ -100,10 +105,20 @@ class TestExtractionRealLlmE2E(unittest.TestCase):
                 self.proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
+        if getattr(self, "log_f", None):
+            self.log_f.close()
         if getattr(self, "ws", None) and os.path.exists(self.ws):
             shutil.rmtree(self.ws, ignore_errors=True)
 
     # ── helpers ──────────────────────────────────────────────
+
+    def _server_log_tail(self, n=4000):
+        """失败诊断：server 日志尾部。"""
+        try:
+            with open(self.log_path, encoding="utf-8", errors="replace") as f:
+                return f.read()[-n:]
+        except OSError as e:
+            return f"<server log unavailable: {e}>"
 
     def _opener(self):
         # 绕过沙箱/系统 HTTP 代理，直连 127.0.0.1
@@ -113,7 +128,9 @@ class TestExtractionRealLlmE2E(unittest.TestCase):
         url = self.base + path
         if params:
             url += "?" + urlencode(params)
-        req = urllib.request.Request(url, data=data, method=method)
+        # 有 body 时必须声明 JSON——否则 FastAPI 拒绝解析（422）
+        headers = {"Content-Type": "application/json"} if data else {}
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
         with self._opener().open(req, timeout=timeout) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8"))
 
@@ -170,7 +187,9 @@ class TestExtractionRealLlmE2E(unittest.TestCase):
                 if doc.get("ocr_status") == status:
                     return doc
             time.sleep(1.0)
-        raise AssertionError(f"doc {doc_id} never reached {status}: last={last}")
+        raise AssertionError(
+            f"doc {doc_id} never reached {status}: last={last}\n"
+            f"--- server log tail ---\n{self._server_log_tail()}")
 
     def _wait_extraction(self, doc_id, label, timeout=300):
         """轮询 metadata 直到维度结果落库，返回解析后的 JSON。"""
@@ -184,7 +203,9 @@ class TestExtractionRealLlmE2E(unittest.TestCase):
             except Exception:
                 pass
             time.sleep(2.0)
-        raise AssertionError(f"extraction '{label}' never appeared for doc {doc_id}")
+        raise AssertionError(
+            f"extraction '{label}' never appeared for doc {doc_id}\n"
+            f"--- server log tail ---\n{self._server_log_tail()}")
 
     # ── tests ────────────────────────────────────────────────
 
