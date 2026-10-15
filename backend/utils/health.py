@@ -108,43 +108,40 @@ class HealthChecker:
         except Exception as e:
             return HealthCheckResult("workspace", "unhealthy", str(e), (time.time() - start) * 1000)
 
-    async def check_api_keys(self, key_manager) -> HealthCheckResult:
-        """检查API密钥池"""
+    async def check_api_config(self, state) -> HealthCheckResult:
+        """检查 API 配置（单 Key 模式；多 Key 轮询由本地代理承担）"""
         start = time.time()
         try:
-            if key_manager is None:
-                return HealthCheckResult("api_keys", "unhealthy", "Key manager not initialized", 0)
+            if state is None or not getattr(state, 'db', None):
+                return HealthCheckResult("api_config", "degraded", "Database not ready", 0)
 
-            all_stats = key_manager.get_all_stats()
-            healthy_services = []
-            unhealthy_services = []
+            from services.config_service import ConfigService
+            cs = ConfigService(state.db)
+            ocr = cs.get_ocr_config()
+            llm = cs.get_chat_config()
 
-            for service, stats in all_stats.items():
-                if not stats.get("enabled"):
-                    continue
+            missing = []
+            if not ocr.get("api_key"):
+                missing.append("OCR API Key")
+            if not ocr.get("model_name"):
+                missing.append("OCR Model")
+            if not llm.get("model_name"):
+                missing.append("LLM Model")
 
-                keys = stats.get("keys", [])
-                service_healthy = any(k.get("is_healthy", False) for k in keys)
-
-                if service_healthy:
-                    healthy_services.append(service)
-                else:
-                    unhealthy_services.append(service)
-
-            status = "healthy" if healthy_services else "degraded"
-            message = f"Services: {', '.join(healthy_services)}"
-            if unhealthy_services:
-                message += f" | Unhealthy: {', '.join(unhealthy_services)}"
+            if missing:
+                return HealthCheckResult(
+                    "api_config", "degraded",
+                    "Missing: " + ", ".join(missing),
+                    (time.time() - start) * 1000,
+                    {"missing": missing}
+                )
 
             return HealthCheckResult(
-                "api_keys",
-                status,
-                message,
-                (time.time() - start) * 1000,
-                {"services": all_stats}
+                "api_config", "healthy", "OCR & LLM configured",
+                (time.time() - start) * 1000
             )
         except Exception as e:
-            return HealthCheckResult("api_keys", "unhealthy", str(e), (time.time() - start) * 1000)
+            return HealthCheckResult("api_config", "unhealthy", str(e), (time.time() - start) * 1000)
 
     async def check_task_queue(self, task_hub) -> HealthCheckResult:
         """检查任务队列"""
@@ -267,8 +264,6 @@ class HealthChecker:
 
     async def run_all_checks(self, state) -> Dict:
         """运行所有健康检查"""
-        from core.api_key_manager import key_manager
-
         checks = []
 
         checks.append(self.check_system_resources())
@@ -279,7 +274,7 @@ class HealthChecker:
         if state.workspace_path:
             checks.append(await self.check_workspace(state.workspace_path))
 
-        checks.append(await self.check_api_keys(key_manager))
+        checks.append(await self.check_api_config(state))
 
         if hasattr(state, 'task_hub'):
             checks.append(await self.check_task_queue(state.task_hub))

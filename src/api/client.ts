@@ -27,21 +27,10 @@ class ApiClient {
     await fetch(`${baseUrl}/configs?key=${key}&value=${encodeURIComponent(value)}`, { method: 'POST' });
   }
 
-  async getMultiKeyStats() {
+  /** 后端存活探测（页脚状态灯 / 连接反馈） */
+  async health() {
     const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/configs/multi-keys`);
-    return res.json();
-  }
-
-  async updateOcrKeys(keysJson: string) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/configs/multi-keys/ocr?ocr_keys=${encodeURIComponent(keysJson)}`, { method: 'POST' });
-    return res.json();
-  }
-
-  async updateLlmKeys(keysJson: string) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/configs/multi-keys/llm?llm_keys=${encodeURIComponent(keysJson)}`, { method: 'POST' });
+    const res = await fetch(`${baseUrl}/health`);
     return res.json();
   }
 
@@ -54,6 +43,13 @@ class ApiClient {
   async getActiveTasks() {
     const baseUrl = await this.getBaseUrl();
     const res = await fetch(`${baseUrl}/tasks`);
+    return res.json();
+  }
+
+  /** 取消排队中/运行中的任务（UX-26） */
+  async cancelTask(docId: number) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/tasks/${docId}/cancel`, { method: 'POST' });
     return res.json();
   }
 

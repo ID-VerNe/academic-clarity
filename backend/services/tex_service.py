@@ -25,6 +25,15 @@ from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown
 from services.prompts import BASIC_INSIGHT_PROMPT
 from services.ai_service import call_json_extraction_api
 from services.config_service import ConfigService
+from utils.websocket import progress_tracker
+
+
+async def _stage(doc_id, progress, step):
+    """流水线阶段上报（UX-26）。上报失败绝不影响主流程。"""
+    try:
+        await progress_tracker.track_task_progress(doc_id, progress, step)
+    except Exception:
+        pass
 
 
 class TexConversionError(Exception):
@@ -158,6 +167,11 @@ async def run_tex_workflow(doc_id, path, db):
     """任务链：tex/zip → ocr_markdown（跳过 OCR API）→ Basic Insight。
     签名匹配 task_manager 的 task_func(doc_id, *args, db=...) 调用约定。"""
     try:
+        try:
+            await progress_tracker.track_task_start(doc_id, "tex")
+        except Exception:
+            pass
+        await _stage(doc_id, 10, "解析 LaTeX 源文件")
         db.update_document_ocr(doc_id, "processing")
         if path.lower().endswith(".zip"):
             md = convert_tex_zip(path, path + "_src")
@@ -167,8 +181,10 @@ async def run_tex_workflow(doc_id, path, db):
             title = _extract_latex_title(path)
         cleaned = clean_ocr_markdown(md)      # 复用现有字段清洗（已验证兼容）
         title = title or extract_title_from_markdown(md)
+        await _stage(doc_id, 60, "生成 Markdown")
         db.update_document_ocr(doc_id, "completed", markdown=cleaned, raw=md, title=title)
         cfg = ConfigService(db).get_extract_config()
+        await _stage(doc_id, 75, "提取 Basic Insight")
         try:
             # tex2txt 产物不含标题行（\title{} 在导言区，已抽到 doc.title）；
             # 显式前置标题供 LLM 提取——否则严格模型对 title 返回 null
@@ -179,7 +195,15 @@ async def run_tex_workflow(doc_id, path, db):
             db.add_document_metadata(doc_id, MetadataConfig.DEFAULT_LABEL, metadata_json)
         except Exception as e:
             print(f"[TexWorkflow] Basic Insight Stage Error: {e}")  # 不阻断主链路
+        try:
+            await progress_tracker.track_task_complete(doc_id)
+        except Exception:
+            pass
     except Exception as e:
         print(f"[TexWorkflow] CRITICAL ERROR: {e}")
         db.update_document_ocr(doc_id, "failed")
+        try:
+            await progress_tracker.track_task_failure(doc_id, str(e))
+        except Exception:
+            pass
         raise e                                # 交由 task_hub 重试（MAX_RETRIES=3）

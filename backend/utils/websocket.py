@@ -18,7 +18,6 @@ class EventType(str, Enum):
     DOC_UPDATED = "doc_updated"
     DOC_DELETED = "doc_deleted"
     OCR_STATUS_CHANGE = "ocr_status_change"
-    KEY_POOL_UPDATE = "key_pool_update"
     SYSTEM_STATUS = "system_status"
     HEARTBEAT = "heartbeat"
 
@@ -200,12 +199,6 @@ class ConnectionManager:
             **kwargs
         }, channels=["task", "document"])
 
-    async def send_key_pool_update(self, service: str, stats: Dict):
-        await self.broadcast(EventType.KEY_POOL_UPDATE, {
-            "service": service,
-            "stats": stats
-        }, channels=["system"])
-
     def get_connection_count(self) -> int:
         return len(self._connections)
 
@@ -290,5 +283,17 @@ class WebSocketProgressTracker:
 
     def get_active_tasks(self) -> Dict[int, Dict]:
         return dict(self._active_tasks)
+
+    def get_stage(self, doc_id: int) -> Optional[Dict]:
+        """当前阶段快照（供 /tasks 轮询合并展示；无记录返回 None）"""
+        task = self._active_tasks.get(doc_id)
+        if not task:
+            return None
+        steps = task.get("steps") or []
+        return {
+            "stage": steps[-1]["step"] if steps else "已加入队列",
+            "progress": task.get("progress", 0),
+            "elapsed": round(time.time() - task.get("start_time", time.time()), 1),
+        }
 
 progress_tracker = WebSocketProgressTracker()

@@ -10,6 +10,7 @@ from services.ai_service import call_ocr_api, call_json_extraction_api
 from utils.text_processor import clean_ocr_markdown, extract_title_from_markdown
 from services.config_service import ConfigService
 from services.prompts import BASIC_INSIGHT_PROMPT
+from utils.websocket import progress_tracker
 
 try:
     from backend.constants import OCRConfig, MetadataConfig
@@ -110,11 +111,24 @@ async def process_page_task(page_idx, total_pages, pix_data, api_config, retries
 
     raise PageOCRFailedError(page_idx, total_pages, last_error or "Unknown error")
 
+async def _stage(doc_id, progress, step):
+    """流水线阶段上报（UX-26）。上报失败绝不影响主流程。"""
+    try:
+        await progress_tracker.track_task_progress(doc_id, progress, step)
+    except Exception:
+        pass
+
+
 async def run_full_ocr_workflow(doc_id, pdf_path, db):
     print(f"[TaskHub] Starting Full Pipeline for: {os.path.basename(pdf_path)}")
     failed_pages = []
 
     try:
+        try:
+            await progress_tracker.track_task_start(doc_id, "ocr")
+        except Exception:
+            pass
+        await _stage(doc_id, 1, "解析 PDF 页面")
         if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
             raise EmptyFileError(f"File {pdf_path} is empty or missing.")
 
@@ -123,12 +137,9 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         total_pages = len(doc)
 
         config_service = ConfigService(db)
-        pool_status = config_service.initialize_key_pools()
         ocr_api_config = config_service.get_ocr_config()
-        if pool_status.get("ocr", False):
-            ocr_api_config['_use_multi_key'] = True
 
-        if not ocr_api_config["api_key"] and not pool_status.get("ocr", False):
+        if not ocr_api_config["api_key"]:
             raise Exception("OCR API Key missing")
 
         page_tasks = []
@@ -142,7 +153,27 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
                 page_images.append(Image.new("RGB", (1, 1), "white"))
             page_tasks.append(process_page_task(i, total_pages, pix_bytes, ocr_api_config))
 
-        results = await asyncio.gather(*page_tasks, return_exceptions=True)
+        done_pages = 0
+        progress_lock = asyncio.Lock()
+
+        async def tracked_page(page_task):
+            nonlocal done_pages
+            try:
+                return await page_task
+            finally:
+                async with progress_lock:
+                    done_pages += 1
+                    done = done_pages
+                await _stage(
+                    doc_id,
+                    round(5 + (done / max(total_pages, 1)) * 55, 1),
+                    f"OCR 第 {done}/{total_pages} 页",
+                )
+
+        results = await asyncio.gather(
+            *(tracked_page(t) for t in page_tasks),
+            return_exceptions=True,
+        )
         doc.close()
 
         page_markdowns = []
@@ -160,10 +191,9 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         title = extract_title_from_markdown(raw_full_content)
 
         print(f"[TaskHub] Stage 2: Deep Extraction for {title}")
+        await _stage(doc_id, 65, "提取 Basic Insight")
 
         extract_api_config = config_service.get_extract_config()
-        if pool_status.get("llm", False):
-            extract_api_config['_use_multi_key'] = True
 
         try:
             metadata_json = await call_json_extraction_api(cleaned_markdown, extract_api_config, BASIC_INSIGHT_PROMPT)
@@ -172,12 +202,14 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
             print(f"[TaskHub] Metadata Stage Error: {e}")
 
         # Phase 1: CrossRef DOI 权威校验（失败不阻断主流水线，降级 unverified）
+        await _stage(doc_id, 88, "校验 DOI")
         try:
             from services.doi_service import verify_document
             verify_document(db, doc_id)
         except Exception as e:
             print(f"[TaskHub] DOI Verify skipped: {e}")
 
+        await _stage(doc_id, 96, "整理结果")
         if failed_pages:
             status_note = f" (Partial: {len(failed_pages)} pages failed: {failed_pages})"
             print(f"[TaskHub] Pipeline completed with failures: {status_note}")
@@ -187,8 +219,16 @@ async def run_full_ocr_workflow(doc_id, pdf_path, db):
         else:
             db.update_document_ocr(doc_id, "completed", markdown=cleaned_markdown, raw=raw_full_content, title=title)
         print(f"[TaskHub] Pipeline SUCCESS: {title}")
+        try:
+            await progress_tracker.track_task_complete(doc_id)
+        except Exception:
+            pass
 
     except Exception as e:
         print(f"[TaskHub] Pipeline CRITICAL ERROR: {e}")
         db.update_document_ocr(doc_id, "failed")
+        try:
+            await progress_tracker.track_task_failure(doc_id, str(e))
+        except Exception:
+            pass
         raise e

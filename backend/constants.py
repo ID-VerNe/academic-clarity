@@ -13,13 +13,6 @@ class OCRConfig:
     DEFAULT_MAX_CONCURRENT = 5
     PAGE_RETRY_BACKOFF = [1, 2, 4]
 
-# ==== API Key Pool ====
-class KeyPoolConfig:
-    UNHEALTHY_THRESHOLD = 5
-    HEALTH_CHECK_COOLDOWN = 60
-    ACQUIRE_TIMEOUT = 5.0
-    RETRY_INTERVAL = 0.1
-
 # ==== Task Manager ====
 class TaskConfig:
     DEFAULT_CONCURRENCY = 10
@@ -88,7 +81,6 @@ class CacheConfig:
     REDIS_PORT = 6379
     DEFAULT_TTL = 300
     DOCUMENT_TTL = 600
-    KEYPOOL_TTL = 30
     MAX_IN_MEMORY_SIZE = 1000
 
 # ==== WebSocket ====

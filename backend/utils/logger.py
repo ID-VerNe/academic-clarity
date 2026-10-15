@@ -141,14 +141,6 @@ class StructuredLogger:
         else:
             self.warning(f"Task {action} for Doc {doc_id}", **extra)
 
-    def log_key_pool(self, action: str, service: str, key_prefix: str = "", **kwargs):
-        """记录密钥池操作"""
-        extra = {"event": "key_pool", "service": service, "action": action}
-        if key_prefix:
-            extra["key"] = f"{key_prefix}..."
-        extra.update(kwargs)
-        self.info(f"KeyPool [{service}] {action}", **extra)
-
     def log_database(self, operation: str, duration_ms: float, rows_affected: int = 0, **kwargs):
         """记录数据库操作"""
         extra = {

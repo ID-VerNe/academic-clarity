@@ -18,6 +18,9 @@ class TaskManager:
         self.workers = []
         self.active_task_ids: set = set()
         self.failed_task_ids: Dict[int, tuple] = {}
+        # UX-26：取消支持——排队中标记跳过，运行中直接取消其 asyncio.Task
+        self.cancelled_task_ids: set = set()
+        self._running: Dict[int, asyncio.Task] = {}
         self._app_state = None
         self._cleanup_task = None
         self._last_cleanup = time.time()
@@ -32,6 +35,8 @@ class TaskManager:
         # 复用旧队列会绑定到已关闭的 loop
         self.queue = asyncio.Queue()
         self.active_task_ids.clear()
+        self.cancelled_task_ids.clear()
+        self._running.clear()
         print(f"[TaskHub] Launching {self.concurrency} parallel workers...")
         for i in range(self.concurrency):
             worker = asyncio.create_task(self._worker_loop(i, app_state))
@@ -80,8 +85,27 @@ class TaskManager:
             print(f"[TaskHub] Doc {doc_id} forcing requeue, clearing failed record")
             self.failed_task_ids.pop(doc_id, None)
 
+        # 重新入队时清除历史取消标记，否则新任务会被 worker 直接丢弃
+        self.cancelled_task_ids.discard(doc_id)
         self.active_task_ids.add(doc_id)
         await self.queue.put((doc_id, task_func, args, 0))
+
+    async def cancel_task(self, doc_id) -> bool:
+        """取消排队中或运行中的任务（UX-26）。
+
+        - 运行中：取消该任务自己的 asyncio.Task（worker 本身存活）
+        - 排队中：标记跳过，worker 认领时直接丢弃
+        返回 True 表示确实命中了一个排队中/运行中的任务。
+        """
+        running = self._running.get(doc_id)
+        if running and not running.done():
+            self.cancelled_task_ids.add(doc_id)
+            running.cancel()
+            return True
+        if doc_id in self.active_task_ids:
+            self.cancelled_task_ids.add(doc_id)
+            return True
+        return False
 
     async def _schedule_retry(self, doc_id, task_func, args, retries):
         """非阻塞方式调度重试，避免阻塞 worker"""
@@ -96,13 +120,33 @@ class TaskManager:
         """Worker 循环认领任务"""
         while True:
             doc_id, task_func, args, retries = await self.queue.get()
+
+            # 已在排队期间被用户取消：直接丢弃，不启动任务
+            if doc_id in self.cancelled_task_ids:
+                self.cancelled_task_ids.discard(doc_id)
+                self.active_task_ids.discard(doc_id)
+                print(f"[Worker-{worker_id}] Task for Doc {doc_id} cancelled before start")
+                self.queue.task_done()
+                continue
+
             print(f"[Worker-{worker_id}] Claimed task for Doc ID: {doc_id}")
 
+            # 任务独立成 asyncio.Task：取消只作用于它，worker 循环保持存活
+            job = asyncio.create_task(task_func(doc_id, *args, db=app_state.db))
+            self._running[doc_id] = job
             try:
-                await task_func(doc_id, *args, db=app_state.db)
+                await job
                 self.active_task_ids.discard(doc_id)
                 self.failed_task_ids.pop(doc_id, None)
                 print(f"[Worker-{worker_id}] Task SUCCESS for Doc: {doc_id}")
+            except asyncio.CancelledError:
+                if job.cancelled() and doc_id in self.cancelled_task_ids:
+                    self.cancelled_task_ids.discard(doc_id)
+                    self.active_task_ids.discard(doc_id)
+                    print(f"[Worker-{worker_id}] Task CANCELLED for Doc: {doc_id}")
+                else:
+                    # worker 自身被取消（如 shutdown）：向上传播
+                    raise
             except Exception as e:
                 print(f"[Worker-{worker_id}] Task FAILED for Doc: {doc_id}. Error: {e}")
 
@@ -113,6 +157,8 @@ class TaskManager:
                     self.failed_task_ids[doc_id] = (retries, time.time())
                     self._cleanup_old_failures()
                     print(f"[Worker-{worker_id}] Max retries reached for Doc: {doc_id}. Giving up.")
+            finally:
+                self._running.pop(doc_id, None)
 
             self.queue.task_done()
 
@@ -120,6 +166,7 @@ class TaskManager:
         """获取任务管理器统计信息"""
         return {
             "active_tasks": len(self.active_task_ids),
+            "running_tasks": len(self._running),
             "queued_tasks": self.queue.qsize(),
             "failed_tasks": len(self.failed_task_ids),
             "failed_task_details": [

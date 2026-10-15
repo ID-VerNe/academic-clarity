@@ -21,7 +21,6 @@ except ImportError:
 class CacheConfig:
     DEFAULT_TTL = getattr(BackendCacheConfig, 'DEFAULT_TTL', 300) if BackendCacheConfig else 300
     DOCUMENT_TTL = getattr(BackendCacheConfig, 'DOCUMENT_TTL', 600) if BackendCacheConfig else 600
-    KEYPOOL_TTL = getattr(BackendCacheConfig, 'KEYPOOL_TTL', 30) if BackendCacheConfig else 30
     ENABLED = getattr(BackendCacheConfig, 'ENABLED', False) if BackendCacheConfig else False
     MAX_IN_MEMORY_SIZE = 1000
 
@@ -236,7 +235,6 @@ class CacheManager:
 
         self._document_cache = DocumentCache(self.cache)
         self._metadata_cache = MetadataCache(self.cache)
-        self._keypool_cache = KeyPoolCache(self.cache)
 
     @property
     def documents(self) -> "DocumentCache":
@@ -245,10 +243,6 @@ class CacheManager:
     @property
     def metadata(self) -> "MetadataCache":
         return self._metadata_cache
-
-    @property
-    def keypool(self) -> "KeyPoolCache":
-        return self._keypool_cache
 
 
 class DocumentCache:
@@ -291,22 +285,6 @@ class MetadataCache:
     def invalidate_metadata(self, doc_id: int):
         for key in self.cache.keys(f"meta:{doc_id}:*"):
             self.cache.delete(key)
-
-
-class KeyPoolCache:
-    """密钥池统计缓存"""
-    def __init__(self, cache_backend):
-        self.cache = cache_backend
-        self.ttl = CacheConfig.KEYPOOL_TTL
-
-    def get_stats(self, service: str) -> Optional[Dict]:
-        return self.cache.get(f"keypool:{service}:stats")
-
-    def set_stats(self, service: str, stats: Dict):
-        self.cache.set(f"keypool:{service}:stats", stats, self.ttl)
-
-    def invalidate_stats(self, service: str):
-        self.cache.delete(f"keypool:{service}:stats")
 
 
 _cache_manager: Optional[CacheManager] = None

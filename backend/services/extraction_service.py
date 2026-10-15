@@ -109,10 +109,7 @@ async def run_dimension_extraction(doc_id: int, dimension_id: str, db):
     if not doc or not (doc.get('ocr_markdown') or '').strip():
         raise DimensionError(f'doc {doc_id} 无 OCR 文本')
     cs = ConfigService(db)
-    pool_status = cs.initialize_key_pools()
     cfg = cs.get_extract_config()
-    if pool_status.get('llm', False):
-        cfg['_use_multi_key'] = True
     async with _LLM_SEMAPHORE:
         raw = await call_json_extraction_api(doc['ocr_markdown'], cfg, dim['prompt'])
     data = json.loads(raw)          # 非法 JSON 抛异常 → 队列重试

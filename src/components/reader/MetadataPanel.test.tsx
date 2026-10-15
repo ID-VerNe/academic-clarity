@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MetadataPanel } from './MetadataPanel';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
+import { ToastHost, clearToasts } from '../ui/Toast';
 
 // Mock the API client
 vi.mock('../../api/client', () => ({
@@ -76,6 +77,7 @@ describe('MetadataPanel DOI tools (Phase 1)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearToasts();
   });
 
   it('does not render DOI buttons without docId or without doi field', () => {
@@ -103,7 +105,10 @@ describe('MetadataPanel DOI tools (Phase 1)', () => {
     });
     const onVerified = vi.fn();
     render(
-      <MetadataPanel data={insightWithDoi} label="Basic Insight" docId={7} onVerified={onVerified} />
+      <>
+        <MetadataPanel data={insightWithDoi} label="Basic Insight" docId={7} onVerified={onVerified} />
+        <ToastHost />
+      </>
     );
 
     fireEvent.click(screen.getByText('验证 DOI'));
@@ -111,28 +116,43 @@ describe('MetadataPanel DOI tools (Phase 1)', () => {
     await waitFor(() => {
       expect(api.verifyDoi).toHaveBeenCalledWith(7);
     });
+    // 徽章：中文状态 + 来源（UX-13）
     await waitFor(() => {
-      expect(screen.getByText(/verified · crossref/)).toBeDefined();
+      expect(screen.getByText(/^DOI 已核实 · CrossRef$/)).toBeDefined();
     });
     expect(onVerified).toHaveBeenCalled();
+    // toast 反馈（UX-06）
+    expect(screen.getByText('DOI 校验完成：DOI 已核实')).toBeDefined();
   });
 
   it('verify failure degrades to unverified badge (no throw)', async () => {
     (api.verifyDoi as any).mockRejectedValue(new Error('network'));
-    render(<MetadataPanel data={insightWithDoi} label="Basic Insight" docId={7} />);
+    render(
+      <>
+        <MetadataPanel data={insightWithDoi} label="Basic Insight" docId={7} />
+        <ToastHost />
+      </>
+    );
 
     fireEvent.click(screen.getByText('验证 DOI'));
 
     await waitFor(() => {
-      expect(screen.getByText(/unverified · unverified/)).toBeDefined();
+      expect(screen.getByText(/^DOI 未核实 · 未核实$/)).toBeDefined();
     });
+    // 失败必须给出可操作的错误提示（UX-06）
+    expect(screen.getByText('DOI 校验失败：无法连接后端服务，请稍后重试。')).toBeDefined();
   });
 
   it('bibtex button copies clipboard on success', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
     (api.getBibtex as any).mockResolvedValue({ bibtex: '@article{...}' });
-    render(<MetadataPanel data={insightWithDoi} label="Basic Insight" docId={7} />);
+    render(
+      <>
+        <MetadataPanel data={insightWithDoi} label="Basic Insight" docId={7} />
+        <ToastHost />
+      </>
+    );
 
     fireEvent.click(screen.getByText('复制 BibTeX'));
 
@@ -143,8 +163,9 @@ describe('MetadataPanel DOI tools (Phase 1)', () => {
       expect(writeText).toHaveBeenCalledWith('@article{...}');
     });
     await waitFor(() => {
-      expect(screen.getByText('BibTeX copied')).toBeDefined();
+      expect(screen.getByText('已复制 BibTeX')).toBeDefined();
     });
+    expect(screen.getByText('已复制 BibTeX 到剪贴板')).toBeDefined();
   });
 
   it('bibtex button shows failure note when clipboard write throws', async () => {
@@ -155,7 +176,7 @@ describe('MetadataPanel DOI tools (Phase 1)', () => {
     fireEvent.click(screen.getByText('复制 BibTeX'));
 
     await waitFor(() => {
-      expect(screen.getByText('Copy failed')).toBeDefined();
+      expect(screen.getByText('复制失败')).toBeDefined();
     });
   });
 
@@ -167,7 +188,7 @@ describe('MetadataPanel DOI tools (Phase 1)', () => {
     fireEvent.click(screen.getByText('复制 BibTeX'));
 
     await waitFor(() => {
-      expect(screen.getByText('No BibTeX available')).toBeDefined();
+      expect(screen.getByText('暂无 BibTeX')).toBeDefined();
     });
   });
 });

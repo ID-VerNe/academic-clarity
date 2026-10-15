@@ -3,7 +3,7 @@
 覆盖：validate_dimension 校验矩阵、save_dimension upsert 与 label 冲突、
 select_batch_candidates 枚举语义（无 markdown 排除 / 已完成跳过 / force /
 doc_ids 过滤）、run_dimension_extraction 三条路径（成功落库 /
-error-JSON 转异常 R6 / 池耗尽异常传播供队列重试）。
+error-JSON 转异常 R6 / API 异常传播供队列重试）。
 """
 import os
 import sys
@@ -26,7 +26,6 @@ if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
 
 from database import Database                       # noqa: E402
 from services import extraction_service as es       # noqa: E402
-from services.ai_service import APIKeyPoolExhaustedError  # noqa: E402
 
 
 class ExtractionServiceTestBase(unittest.TestCase):
@@ -184,9 +183,10 @@ class TestRunDimensionExtraction(ExtractionServiceTestBase):
             self._run(mock_return='{"error": "Extraction timeout"}')
         self.assertEqual(self._metadata_rows(), [])
 
-    def test_pool_exhausted_propagates_for_retry(self):
-        with self.assertRaises(APIKeyPoolExhaustedError):
-            self._run(mock_side_effect=APIKeyPoolExhaustedError("all keys down"))
+    def test_api_error_propagates_for_retry(self):
+        # 多 Key 轮询已移除；任意 API 异常都必须向上传播供队列重试
+        with self.assertRaises(RuntimeError):
+            self._run(mock_side_effect=RuntimeError("llm down"))
         self.assertEqual(self._metadata_rows(), [])
 
     def test_invalid_json_propagates(self):

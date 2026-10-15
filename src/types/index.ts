@@ -26,6 +26,10 @@ export interface Document {
   doi_source?: 'llm' | 'crossref' | 'unverified' | null;
   bibtex?: string | null;
   added_at: string;
+  /** 仅 /tasks 返回：流水线当前阶段快照（UX-26） */
+  stage?: string;
+  progress?: number;
+  elapsed?: number;
 }
 
 export interface DoiVerification {
@@ -83,43 +87,8 @@ export interface BatchRunResult {
 export interface AppConfig {
   DEEPSEEK_API_KEY: string;
   API_BASE: string;
+  /** OCR 模型名（生效值，用于配置完整性校验） */
+  OCR_MODEL: string;
   WORKSPACE_PATH: string;
   TABLE_STYLE: string;
-  USE_MULTI_KEY: boolean;
-  OCR_MULTI_KEY: boolean;
-  LLM_MULTI_KEY: boolean;
-}
-
-export interface KeyConfig {
-  api_key: string;
-  api_base?: string;
-  model_name?: string;
-  max_concurrent?: number;
-  rpm_limit?: number;
-  tpm_limit?: number;
-  enabled?: boolean;
-}
-
-export interface KeyStats {
-  api_key: string;
-  api_base: string;
-  model_name: string;
-  active_requests: number;
-  max_concurrent: number;
-  rpm_limit: number;
-  rpm_used: number;
-  tpm_limit: number;
-  tpm_used: number;
-  is_healthy: boolean;
-  consecutive_errors: number;
-}
-
-export interface KeyPoolStats {
-  enabled: boolean;
-  keys: KeyStats[];
-}
-
-export interface MultiKeyStats {
-  ocr: KeyPoolStats;
-  llm: KeyPoolStats;
 }

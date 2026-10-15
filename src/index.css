@@ -1,9 +1,10 @@
-/* @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Source+Serif+Pro:ital,wght@0,400;0,600;0,700;1,400&display=swap'); */
+/* 字体策略：不依赖外部字体 CDN（桌面端离线可用），
+   Latin 用系统 UI 字体，CJK 走系统中文栈。 */
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "Source Serif Pro", serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  --font-serif: "Source Serif Pro", "Georgia", "Songti SC", "SimSun", serif;
 }
 
 @layer base {

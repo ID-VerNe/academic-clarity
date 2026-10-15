@@ -69,18 +69,6 @@ class MetricsCollector:
             'Number of tasks in queue'
         )
 
-        self.api_key_usage = Gauge(
-            'academic_clarity_api_key_usage',
-            'API key usage metrics',
-            ['service', 'api_key_prefix']
-        )
-
-        self.api_key_health = Gauge(
-            'academic_clarity_api_key_health',
-            'API key health status (1=healthy, 0=unhealthy)',
-            ['service', 'api_key_prefix']
-        )
-
         self.database_operations = Histogram(
             'academic_clarity_database_operations_seconds',
             'Database operation duration',
@@ -127,16 +115,6 @@ class MetricsCollector:
     def set_tasks_queued(self, count: int):
         """设置队列中的任务数"""
         self.tasks_queued.set(count)
-
-    def update_key_stats(self, service: str, key_prefix: str, rpm_used: int, rpm_limit: int,
-                        tpm_used: int, tpm_limit: int, is_healthy: bool):
-        """更新API密钥统计"""
-        self.api_key_usage.labels(service=service, api_key_prefix=key_prefix).set(
-            rpm_used / rpm_limit if rpm_limit > 0 else 0
-        )
-        self.api_key_health.labels(service=service, api_key_prefix=key_prefix).set(
-            1 if is_healthy else 0
-        )
 
     def record_database_operation(self, operation: str, duration: float):
         """记录数据库操作"""

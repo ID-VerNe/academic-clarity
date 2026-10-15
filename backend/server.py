@@ -37,7 +37,7 @@ from utils.security import secure_filename
 from services.config_service import ConfigService
 from services.workspace_service import WorkspaceService
 from core.task_manager import task_hub
-from utils.logger import core_logger, api_logger, task_logger, db_logger, key_logger, get_logger
+from utils.logger import core_logger, api_logger, task_logger, db_logger, get_logger
 from utils.metrics import metrics
 from utils.middleware import PrometheusMetricsMiddleware, RequestLoggingMiddleware
 from utils.health import health_checker
@@ -61,9 +61,6 @@ class AppState:
         self.workspace_path = ""
         self.db = None
         self.workspace_service = None
-        self.use_multi_key = False
-        self.ocr_multi_key = False
-        self.llm_multi_key = False
         self.task_hub = task_hub
         self.start_time = time.time()
 
@@ -73,11 +70,6 @@ class AppState:
         self.workspace_path = path
         self.db = Database(os.path.join(path, "library.db"))
         self.workspace_service = WorkspaceService(path, self.db)
-        config_service = ConfigService(self.db)
-        pool_status = config_service.initialize_key_pools()
-        self.ocr_multi_key = pool_status.get("ocr", False)
-        self.llm_multi_key = pool_status.get("llm", False)
-        self.use_multi_key = self.ocr_multi_key or self.llm_multi_key
 
         init_cache()
 
@@ -85,14 +77,11 @@ class AppState:
 
         metrics.set_app_info(
             version="1.0.0",
-            workspace=path,
-            multi_key_enabled=str(self.use_multi_key)
+            workspace=path
         )
 
-        core_logger.info(f"Application initialized", workspace=path, multi_key=self.use_multi_key)
+        core_logger.info(f"Application initialized", workspace=path)
         print(f"[Core] Active workspace: {path}")
-        print(f"[Core] OCR multi-key: {'enabled' if self.ocr_multi_key else 'disabled'}")
-        print(f"[Core] LLM multi-key: {'enabled' if self.llm_multi_key else 'disabled'}")
 
 state = AppState()
 
@@ -231,7 +220,40 @@ async def metrics_summary():
 async def list_active_tasks():
     if not state.db: return []
     docs = state.db.get_all_documents()
-    return [d for d in docs if d['ocr_status'] in ['pending', 'processing']]
+    active = [d for d in docs if d['ocr_status'] in ['pending', 'processing']]
+    # 合并流水线阶段快照（UX-26）：stage / progress / elapsed
+    for d in active:
+        stage = progress_tracker.get_stage(d['id'])
+        if stage:
+            d['stage'] = stage['stage']
+            d['progress'] = stage['progress']
+            d['elapsed'] = stage['elapsed']
+    return active
+
+@app.post("/tasks/{doc_id}/cancel")
+async def cancel_active_task(doc_id: int):
+    """取消排队中/运行中的文档任务（UX-26）。状态回落为 failed，可重新处理。"""
+    doc = state.db.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    hit = await state.task_hub.cancel_task(doc_id)
+    if priority_task_hub:
+        try:
+            hit = (await priority_task_hub.cancel_by_doc_id(doc_id)) or hit
+        except Exception as e:
+            print(f"[TaskHub] priority cancel skipped: {e}")
+
+    if hit or doc['ocr_status'] in ['pending', 'processing']:
+        state.db.update_document_ocr(doc_id, "failed")
+        try:
+            await progress_tracker.track_task_failure(doc_id, "已取消")
+        except Exception:
+            pass
+        await ws_manager.send_document_update("updated", doc_id, state.db.get_document(doc_id))
+        return {"success": True, "doc_id": doc_id}
+
+    return {"success": False, "doc_id": doc_id, "message": "任务已结束，无需取消"}
 
 @app.get("/tasks/stats")
 async def get_task_stats():
@@ -283,63 +305,15 @@ async def sync_workspace():
 
 @app.get("/configs")
 async def get_configs():
+    # 返回「生效值」（DB → config.py 默认值），供 UI 判断配置完整性（UX-32）
+    cs = ConfigService(state.db)
+    ocr = cs.get_ocr_config()
     return {
-        "DEEPSEEK_API_KEY": state.db.get_config("DEEPSEEK_API_KEY", ""),
-        "API_BASE": state.db.get_config("API_BASE", "https://api.siliconflow.cn/v1"),
+        "DEEPSEEK_API_KEY": ocr["api_key"],
+        "API_BASE": ocr["api_base"],
+        "OCR_MODEL": ocr["model_name"],
         "WORKSPACE_PATH": state.workspace_path,
-        "TABLE_STYLE": state.db.get_config("TABLE_STYLE", "three-line"),
-        "USE_MULTI_KEY": state.use_multi_key,
-        "OCR_MULTI_KEY": state.ocr_multi_key,
-        "LLM_MULTI_KEY": state.llm_multi_key
-    }
-
-@app.get("/configs/multi-keys")
-async def get_multi_key_stats():
-    from core.api_key_manager import key_manager
-    stats = key_manager.get_all_stats()
-
-    for service, service_stats in stats.items():
-        if "keys" in service_stats:
-            for key_stats in service_stats["keys"]:
-                key_prefix = key_stats.get("api_key", "")[:8]
-                metrics.update_key_stats(
-                    service=service,
-                    key_prefix=key_prefix,
-                    rpm_used=key_stats.get("rpm_used", 0),
-                    rpm_limit=key_stats.get("rpm_limit", 60),
-                    tpm_used=key_stats.get("tpm_used", 0),
-                    tpm_limit=key_stats.get("tpm_limit", 100000),
-                    is_healthy=key_stats.get("is_healthy", True)
-                )
-
-    return stats
-
-@app.post("/configs/multi-keys/ocr")
-async def update_ocr_keys(ocr_keys: str = Query(...)):
-    state.db.set_config("OCR_API_KEYS", ocr_keys)
-    config_service = ConfigService(state.db)
-    pool_status = config_service.initialize_key_pools()
-    state.ocr_multi_key = pool_status.get("ocr", False)
-    state.use_multi_key = state.ocr_multi_key or state.llm_multi_key
-    key_logger.log_key_pool("updated", "ocr")
-    return {
-        "success": True,
-        "ocr_multi_key": state.ocr_multi_key,
-        "ocr_pool": key_manager.get_pool("ocr").get_stats() if key_manager.get_pool("ocr") else []
-    }
-
-@app.post("/configs/multi-keys/llm")
-async def update_llm_keys(llm_keys: str = Query(...)):
-    state.db.set_config("LLM_API_KEYS", llm_keys)
-    config_service = ConfigService(state.db)
-    pool_status = config_service.initialize_key_pools()
-    state.llm_multi_key = pool_status.get("llm", False)
-    state.use_multi_key = state.ocr_multi_key or state.llm_multi_key
-    key_logger.log_key_pool("updated", "llm")
-    return {
-        "success": True,
-        "llm_multi_key": state.llm_multi_key,
-        "llm_pool": key_manager.get_pool("llm").get_stats() if key_manager.get_pool("llm") else []
+        "TABLE_STYLE": state.db.get_config("TABLE_STYLE", "three-line")
     }
 
 @app.post("/configs")
@@ -417,8 +391,6 @@ async def trigger_custom_extraction(doc_id: int, request: MetadataRequest):
 
     config_service = ConfigService(state.db)
     extract_api_config = config_service.get_extract_config()
-    if state.llm_multi_key:
-        extract_api_config['_use_multi_key'] = True
 
     try:
         from services.ai_service import call_json_extraction_api
@@ -495,8 +467,6 @@ async def chat_with_doc(request: ChatRequest):
         return {"response": "OCR results not available."}
     config_service = ConfigService(state.db)
     api_config = config_service.get_chat_config()
-    if state.llm_multi_key:
-        api_config['_use_multi_key'] = True
     # Phase 2 引用模式：只喂逐字引文（LLM 不许外溢，cite:// 编号可回查）；
     # 无 quotes → 现有全量 ocr_markdown。
     if request.quotes:
