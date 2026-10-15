@@ -16,6 +16,7 @@ import unittest
 import urllib.request
 import urllib.error
 import subprocess
+from urllib.parse import urlsplit
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 current = BASE_DIR
@@ -66,12 +67,33 @@ def _free_port():
     return port
 
 
+def _proxy_reachable(url):
+    """TCP 探测 LLM 代理端口；url 解析失败或连不上返回 False。"""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+        # url 形如 http://localhost:37210（不含 /v1），port 可能缺省
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return False
+    if not host:
+        return False
+    try:
+        with socket.create_connection((host, port), timeout=3):
+            return True
+    except OSError:
+        return False
+
+
 @unittest.skipUnless(os.environ.get("AC_E2E_LLM") == "1", "set AC_E2E_LLM=1 to run real LLM e2e")
 class TestTexRealLlmE2E(unittest.TestCase):
     def setUp(self):
         self.key = _load_key()
         if not self.key:
             self.skipTest("test/key.json not found")
+        # 断网/代理未启动时降级 SKIP 而非 FAIL：先探测 TCP 可达，再起 server
+        if not _proxy_reachable(self.key["url"]):
+            self.skipTest(f"LLM proxy unreachable: {self.key['url']}")
         self.ws = os.path.join(BASE_DIR, f"test_ws_tex_e2e_{uuid.uuid4().hex}")
         os.makedirs(self.ws)
         self.port = _free_port()

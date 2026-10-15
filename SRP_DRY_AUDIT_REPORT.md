@@ -204,13 +204,13 @@
 
 | 位置 | 形式 | 处置 |
 |---|---|---|
-| `backend/services/ai_service.py:7` | `from litellm import completion`；3 处调用（OCR/Chat/JSON 提取） | **重写为 openai SDK**（python_embed 已装 openai 2.26.0）；保留 `_make_client()` 模块级 seam |
-| `tests/ocr_lab/debug_ocr.py:9,42-53` | 直接 import + 调用 | **删除脚本**（一次性实验代码，硬编码本机路径） |
-| `tests/integration/test_integration.py:101` | `patch('services.ai_service.completion')` | 改 patch `services.ai_service._make_client` |
-| `tests/system/test_edge_cases.py:79` | 同上 + 异常注入 | 同上；side_effect 升级为 openai 异常类型 |
-| `tests/system/test_extraction_real_llm.py:5-6,98` | 注释 + `"openai/" + model` 前缀依赖 | 新实现**保留前缀剥离**（存量 DB 配置兼容）；更新注释 |
-| `tests/system/test_tex_real_llm.py:98` | 同上 | 同上 |
-| `python_embed/Lib/site-packages/litellm*` | 已安装包本体（1.82.1） | **物理删除**（先备份，全量测试通过后销毁） |
+| `backend/services/ai_service.py:7` | `from litellm import completion`；3 处调用（OCR/Chat/JSON 提取） | ✅ **已重写为 openai SDK**；`_make_client()` 模块级 seam + `_strip_provider_prefix()` + `_call_llm()` 共享样板 |
+| `tests/ocr_lab/debug_ocr.py:9,42-53` | 直接 import + 调用 | ✅ **已删除**（连同 `tests/ocr_lab/output/` 实验残留：2 个 litellm 报错文件 + 2 个空文件 + 2 个实验片段） |
+| `tests/integration/test_integration.py:101` | `patch('services.ai_service.completion')` | ✅ 改 patch `services.ai_service._make_client` |
+| `tests/system/test_edge_cases.py:79` | 同上 + 异常注入 | ✅ 同上（side_effect 保持通用 Exception，验证 error-JSON 协议） |
+| `tests/system/test_extraction_real_llm.py:5-6,98` | 注释 + `"openai/" + model` 前缀依赖 | ✅ 注释更新；新实现保留前缀剥离；setUp 加 TCP 探测（不可达 → SKIP） |
+| `tests/system/test_tex_real_llm.py:98` | 同上 | ✅ 同上 |
+| `python_embed/Lib/site-packages/litellm*` | 已安装包本体（1.82.1） | ✅ **物理删除**（未留备份；如需恢复可从 PyPI 重新获取同版本） |
 | `UX_AUDIT_REPORT.md:414` | 历史文档提及 | 保留（历史记录，不改） |
 
 ### 6.2 替换设计决策
@@ -270,10 +270,27 @@
 
 ## 9. 修复结果与验证
 
-> 本节在全部修复完成后更新。
+### 批次 1 — 后端/前端/测试三层拆分（commit `cae97d3`）
 
-- [ ] 批次 1 完成 + 全量测试
-- [ ] 批次 2（LiteLLM 移除）完成 + 全量测试
+- 121 个文件（44 modified / 2 deleted / 75 added）；净减 ~4700 行
+- 全量测试 **34/34 PASS**（103.86s）；前端 Vitest 91 用例全绿；TSC lint 通过
+- `vitest.config.ts` testTimeout 5s→20s（全量并行时 CPU 争抢致假超时，单独跑 14s 全绿佐证）
+
+### 批次 2 — LiteLLM 完全移除（commit 见 git log）
+
+- `backend/services/ai_service.py` 重写为 openai SDK（2.26.0）：
+  - `_make_client(api_config)` 模块级 seam（`max_retries=0`，重试由业务层统一负责）
+  - `_strip_provider_prefix()`：存量 `openai/` 前缀在 HTTP 前剥离（兼容 config.py.example 与用户 DB）
+  - `_call_llm()` 共享请求样板（B-DRY-04）；OCR 采样参数上收 `OCRConfig.DEFAULT_TEMPERATURE/MAX_TOKENS`（B-SRP-21）
+- 错误协议统一（B-SRP-21）：`call_ocr_api` 由返回 `"OCR Failed: ..."` 字符串改为抛 `APIResponseError`；`ocr_images.py` 字符串探测改 try/except（消除跨模块字符串契约）
+- 测试 mock 迁移：2 处 `patch('services.ai_service.completion')` → `patch('services.ai_service._make_client')`
+- E2E 网络探测降级（T-16）：`_proxy_reachable()` TCP 探测，代理不可达 → SKIP 而非 FAIL
+- 删除 `tests/ocr_lab/`（debug_ocr.py + output/ 实验残留共 7 文件）
+- 物理删除 `python_embed/Lib/site-packages/litellm` + `litellm-1.82.1.dist-info`；验证 `import litellm` → ModuleNotFoundError；`import server` 正常
+- 全量测试 **34/34 PASS**（137.70s，无 litellm 环境）
+
+- [x] 批次 1 完成 + 全量测试
+- [x] 批次 2（LiteLLM 移除）完成 + 全量测试
 - [ ] 批次 3（测试迁移）完成 + 全量测试
 - [ ] 报告终稿 + 合并 main
 

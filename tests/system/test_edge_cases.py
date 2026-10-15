@@ -76,20 +76,22 @@ class TestEdgeCases(unittest.TestCase):
         api_config = {"api_key": "test", "api_base": "test", "model_name": "test"}
         
         async def run_test():
-            with patch('services.ai_service.completion') as mock_comp:
+            # 拦截 client 工厂（_make_client seam）：一条 mock 覆盖 ai_service 全部网络出口
+            with patch('services.ai_service._make_client') as mock_make:
+                create = mock_make.return_value.chat.completions.create
                 # Case 1: Non-JSON content
                 mock_response = MagicMock()
                 mock_response.choices = [MagicMock()]
                 mock_response.choices[0].message.content = "This is not JSON"
-                mock_comp.return_value = mock_response
-                
+                create.return_value = mock_response
+
                 res = await call_json_extraction_api("content", api_config, "prompt")
                 data = json.loads(res)
                 self.assertIn("error", data)
                 self.assertEqual(data["error"], "Model returned invalid JSON")
-                
+
                 # Case 2: Generic exception (e.g. connection error)
-                mock_comp.side_effect = Exception("Connection Timeout")
+                create.side_effect = Exception("Connection Timeout")
                 res = await call_json_extraction_api("content", api_config, "prompt")
                 data = json.loads(res)
                 self.assertIn("error", data)

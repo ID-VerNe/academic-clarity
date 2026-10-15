@@ -98,12 +98,13 @@ class TestAcademicClarityIntegration(unittest.TestCase):
         self.db.update_document_ocr(doc_id, "completed", markdown=mock_context)
         
         async def run_mocked_chat():
-            with patch('services.ai_service.completion') as mock_comp:
+            # 拦截 client 工厂（_make_client seam）：一条 mock 覆盖 ai_service 全部网络出口
+            with patch('services.ai_service._make_client') as mock_make:
                 mock_response = MagicMock()
                 mock_response.choices = [MagicMock()]
                 mock_response.choices[0].message.content = "Response"
-                mock_comp.return_value = mock_response
-                
+                mock_make.return_value.chat.completions.create.return_value = mock_response
+
                 response = await call_chat_api("Hi", mock_context, {"api_key":"k", "api_base":"b", "model_name":"m"})
                 self.assertEqual(response, "Response")
 

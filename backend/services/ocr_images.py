@@ -100,15 +100,9 @@ async def process_page_task(page_idx, total_pages, pix_data, api_config, retries
         print(f"[OCR] Processing Page {page_idx + 1}/{total_pages} (Attempt {attempt + 1})...")
         try:
             image = Image.open(BytesIO(pix_data))
-            content = await call_ocr_api(image, api_config)
-
-            if isinstance(content, str) and content.startswith("OCR Failed:"):
-                last_error = content
-                if attempt < retries - 1:
-                    await asyncio.sleep(_retry_backoff(attempt))
-                continue
-
-            return content
+            # call_ocr_api 失败抛 APIResponseError（统一异常协议，B-SRP-21），
+            # 与网络/解码错误走同一重试路径，不再解析 "OCR Failed:" 字符串。
+            return await call_ocr_api(image, api_config)
 
         except Exception as e:
             last_error = str(e)
