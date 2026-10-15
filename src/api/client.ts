@@ -2,6 +2,7 @@
  * Unified API Client for Academic Clarity
  * Handles port discovery, URL construction, and error handling.
  */
+import { ExtractionDimension, BatchRunResult } from '../types';
 
 class ApiClient {
   private async getBaseUrl() {
@@ -108,6 +109,54 @@ class ApiClient {
     const baseUrl = await this.getBaseUrl();
     const res = await fetch(`${baseUrl}/knowledge/papers/${encodeURIComponent(paperId)}/claims`);
     return res.json();
+  }
+
+  // ── Phase 3：提取维度 / 批量 / 导出 ────────────────────
+
+  /** 维度列表 */
+  async getDimensions() {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/extraction/dimensions`);
+    return res.json();
+  }
+
+  /** 新建/更新维度（400 校验失败 → throw 带 detail） */
+  async saveDimension(dim: Partial<ExtractionDimension>) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/extraction/dimensions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dim)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`);
+    return data;
+  }
+
+  async deleteDimension(id: string) {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/extraction/dimensions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return res.json();
+  }
+
+  /** 批量提取入队（docIds 空 = 全部候选；force 重跑已有结果） */
+  async runBatch(dimensionId: string, docIds?: number[], force = false): Promise<BatchRunResult> {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/extraction/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dimension_id: dimensionId, doc_ids: docIds || [], force })
+    });
+    return res.json();
+  }
+
+  /** 导出维度结果为 Blob（组件用 createObjectURL 触发下载） */
+  async exportDimension(dimensionId: string, format: 'csv' | 'md') {
+    const baseUrl = await this.getBaseUrl();
+    const res = await fetch(
+      `${baseUrl}/documents/export?dimension_id=${encodeURIComponent(dimensionId)}&format=${format}`);
+    if (!res.ok) throw new Error(`Export failed: HTTP ${res.status}`);
+    return res.blob();
   }
 
   async getMetadata(docId: number) {

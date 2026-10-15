@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Settings, Database, Cpu, FolderOpen, Save, Plus, Trash2, RefreshCw, CheckCircle, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import { X, Settings, Database, Cpu, FolderOpen, Save, Plus, Trash2, RefreshCw, CheckCircle, XCircle, Loader2, AlertCircle, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppConfig, MultiKeyStats, KeyConfig, KeyPoolStats } from '../types';
 import { api } from '../api/client';
+import { DimensionManager } from './settings/DimensionManager';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -12,7 +13,7 @@ interface SettingsModalProps {
   onSelectWorkspace: () => void;
 }
 
-type TabType = 'basic' | 'ocr-keys' | 'llm-keys';
+type TabType = 'basic' | 'ocr-keys' | 'llm-keys' | 'dimensions';
 
 interface ValidationError {
   field: string;
@@ -458,6 +459,7 @@ export const SettingsModal = ({
             {renderTab('basic', 'Basic', <Database className="w-3 h-3" />)}
             {renderTab('ocr-keys', 'OCR Keys', <Cpu className="w-3 h-3" />)}
             {renderTab('llm-keys', 'LLM Keys', <Cpu className="w-3 h-3" />)}
+            {renderTab('dimensions', 'Dimensions', <Layers className="w-3 h-3" />)}
           </div>
 
           <div className="p-8 max-h-[60vh] overflow-y-auto custom-scrollbar">
@@ -530,6 +532,8 @@ export const SettingsModal = ({
                 )}
               </section>
             )}
+
+            {activeTab === 'dimensions' && <DimensionManager />}
           </div>
 
           <div className="px-8 py-6 bg-slate-50 border-t border-slate-100 flex justify-between">
