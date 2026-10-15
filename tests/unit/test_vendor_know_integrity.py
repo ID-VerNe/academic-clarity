@@ -4,6 +4,12 @@ vendor 逐字拷贝禁改；本测试对 5 个 .py 算 sha256 钉基线。
 任何 vendor 变更 = 整包替换 + 重新记基线（agents.md §6）。
 基线来源：paper-tools@176ac7b1ec7ddc52cc05ada7a84b08c072bb6339
 （know/ 目录，diff -q 逐字校验通过）。
+
+EOL 归一化（2026-10-15）：core.autocrlf=true 的 checkout 会把工作区
+文件 LF→CRLF，原始字节哈希会被行尾噪声击穿（identity.py 曾因此误报）。
+现统一先 \r\n→\n 再算 sha256——归一化后的哈希 == git blob 哈希
+（`git cat-file -p HEAD:backend/vendor/know/<f>.py | sha256sum`），
+即仓库规范形态；任何真实内容篡改仍会改变归一化哈希。
 """
 import os
 import sys
@@ -19,11 +25,11 @@ while current and not os.path.exists(os.path.join(current, "backend")):
 VENDOR_KNOW = os.path.join(current, "backend", "vendor", "know")
 
 BASELINE = {
-    "anchors.py": "bfe7b2d7eca70b179ffcc7789d11b849a3a8c97d8d2d2fb86e277bf73aebe60a",
-    "config.py": "4a5a0844ca740762fd0d322dd98ec285638d0b72e55f6558f70c3724efe4697a",
-    "derive.py": "20db7d0a99657584423154b110862ec2fcdc98100167ab43f5ab0a5fe331f053",
+    "anchors.py": "3e64897873fd6e4aa5bf6eacbdde8fc25d604fd8adfdd1c3c360238255cb2300",
+    "config.py": "0d03e48f700d616d31249e0e251bb0c2c6ecf18005dc4ce95d7242fdb7171eb0",
+    "derive.py": "1d4d54eb34d62fb6965ccd4174d8d4dddffb47265bd5de1f4d2c4b4392ca83c6",
     "identity.py": "7308156fa84b6e355cceb3415f22a4f94b1e8125da7f4e8b1aef547cb28e9764",
-    "know.py": "548bd1e49debc0287079370131d64bdbbe8c881edd62c28cdb6c7cac44067795",
+    "know.py": "aa3d077cc8c9950b24ecd09e4cbef3186cec2c3d0a14e4d9f92ac282ae545ec0",
 }
 
 EXPECTED_FILES = set(BASELINE)
@@ -41,7 +47,8 @@ class TestVendorKnowIntegrity(unittest.TestCase):
             with self.subTest(module=name):
                 path = os.path.join(VENDOR_KNOW, name)
                 self.assertTrue(os.path.exists(path), f"missing {name}")
-                digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+                raw = open(path, "rb").read().replace(b"\r\n", b"\n")
+                digest = hashlib.sha256(raw).hexdigest()
                 self.assertEqual(digest, expected,
                                  f"{name} 与基线不符——vendor 被改动？"
                                  f"若是 intentional 升级，整包替换并重记基线")
