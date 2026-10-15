@@ -170,7 +170,12 @@ async def run_tex_workflow(doc_id, path, db):
         db.update_document_ocr(doc_id, "completed", markdown=cleaned, raw=md, title=title)
         cfg = ConfigService(db).get_extract_config()
         try:
-            metadata_json = await call_json_extraction_api(cleaned, cfg, BASIC_INSIGHT_PROMPT)
+            # tex2txt 产物不含标题行（\title{} 在导言区，已抽到 doc.title）；
+            # 显式前置标题供 LLM 提取——否则严格模型对 title 返回 null
+            # （OCR 路径 markdown 天然含标题，无此问题）。仅改 LLM 输入，
+            # 存储 markdown 不变（证据引文锚定仍以存储文本为准）。
+            llm_input = f"# {title}\n\n{cleaned}" if title else cleaned
+            metadata_json = await call_json_extraction_api(llm_input, cfg, BASIC_INSIGHT_PROMPT)
             db.add_document_metadata(doc_id, MetadataConfig.DEFAULT_LABEL, metadata_json)
         except Exception as e:
             print(f"[TexWorkflow] Basic Insight Stage Error: {e}")  # 不阻断主链路

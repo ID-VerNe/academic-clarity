@@ -156,6 +156,11 @@ class TestTexUploadFlow(unittest.TestCase):
             self.assertEqual(len(basic), 1)
             self.assertEqual(json.loads(basic[0]["content_json"])["title"], "Real Title")
             self.assertTrue(mock_llm.called)
+            # LLM 输入显式前置标题行（tex markdown 不含标题）；存储 markdown 不变
+            llm_md = mock_llm.call_args[0][0]
+            self.assertTrue(llm_md.startswith("# Real Title"),
+                            f"LLM input should carry title: {llm_md[:60]!r}")
+            self.assertNotIn("Real Title", doc["ocr_markdown"])
 
     @patch('server.run_full_ocr_workflow', new_callable=AsyncMock)
     @patch('server.run_tex_workflow', new_callable=AsyncMock)
