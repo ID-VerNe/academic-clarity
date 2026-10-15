@@ -210,6 +210,20 @@ class TestExtractionBatchFlow(unittest.TestCase):
                                 json={"dimension_id": "missing"})
         self.assertEqual(resp.status_code, 404)
 
+    def test_batch_disabled_dimension_400_fail_fast(self):
+        # 停用维度：端点直接 400，不产生注定失败的队列任务
+        resp = self.client.post("/extraction/dimensions",
+                                json={"id": self.dim_id, "label": "Method",
+                                      "prompt": "Extract method.",
+                                      "enabled": False})
+        self.assertTrue(resp.json()["success"])
+        resp = self.client.post("/extraction/batch",
+                                json={"dimension_id": self.dim_id})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["detail"], "dimension disabled")
+        # 无结果行产生
+        self.assertEqual(self._dim_rows(self.d1), [])
+
 
 if __name__ == "__main__":
     unittest.main(argv=['first-arg-is-ignored'], exit=False)

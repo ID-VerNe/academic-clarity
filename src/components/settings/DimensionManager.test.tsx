@@ -185,6 +185,18 @@ describe('DimensionManager Component', () => {
     expect(await screen.findByText('no documents')).toBeDefined();
   });
 
+  it('disables Run Batch for a disabled dimension (fail-fast parity)', async () => {
+    render(<DimensionManager />);
+    await screen.findByText('Methodology');
+
+    expect(screen.getByLabelText('Run Batch Methodology')).not.toBeDisabled();
+    expect(screen.getByLabelText('Run Batch Limitations')).toBeDisabled();
+
+    // 点击停用维度的按钮不应触发任何请求
+    fireEvent.click(screen.getByLabelText('Run Batch Limitations'));
+    expect(runBatch).not.toHaveBeenCalled();
+  });
+
   it('exports CSV via Blob download', async () => {
     render(<DimensionManager />);
     await screen.findByText('Methodology');

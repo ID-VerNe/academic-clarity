@@ -208,9 +208,9 @@ export const DimensionManager = () => {
               <button
                 aria-label={`Run Batch ${dim.label}`}
                 onClick={() => handleRunBatch(dim)}
-                disabled={busy === dim.id}
-                className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                title="Batch Run"
+                disabled={busy === dim.id || !dim.enabled}
+                className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                title={dim.enabled ? "Batch Run" : "Disabled dimension"}
               >
                 {busy === dim.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
               </button>

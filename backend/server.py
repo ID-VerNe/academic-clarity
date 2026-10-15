@@ -585,6 +585,10 @@ async def run_batch_extraction(req: BatchExtractRequest):
     dim = extraction_service.get_dimension(state.db, req.dimension_id)
     if not dim:
         raise HTTPException(status_code=404, detail="dimension not found")
+    if not dim["enabled"]:
+        # fail-fast：worker 也会拒绝停用维度，但入队后重试耗尽才失败，
+        # 用户看到「已入队」却无结果——直接在端点拒绝（与 worker 检查一致）
+        raise HTTPException(status_code=400, detail="dimension disabled")
     to_run, skipped = await asyncio.to_thread(
         extraction_service.select_batch_candidates, state.db,
         req.dimension_id, req.doc_ids or None, req.force)
