@@ -10,6 +10,7 @@
 - **前端反馈**：全局提示一律走 `src/components/ui/Toast.tsx`（`toast.success/error/info` + `<ToastHost/>`，测试用 `clearToasts()`）；确认交互一律用 `src/components/ui/ConfirmDialog.tsx`，**禁止** `window.confirm/alert`。
 - **文案**：全中文；术语统一「文献库 / 提取维度 / 立即提取（仅本文档）」。`AppConfig` 收敛为 5 字段。
 - **任务可见性**：后端 `progress_tracker.track_task_progress(doc_id, progress, step)` 上报阶段，`GET /tasks` 合并 `stage/progress/elapsed`；取消走 `POST /tasks/{doc_id}/cancel`（`TaskManager` 用 `asyncio.create_task` 跑独立 job，取消只杀任务不杀 worker）。
+- **编码规范（2026-10-16 起，`agents.md` §5 为正典）**：**不设行数硬上限**（旧「超 200 行必拆」规则已废止）——按职责边界拆模块；新增代码先规划结构/接口 + 先检索复用（`src/utils/` / `src/hooks/` / `backend/utils/` / `backend/services/` / `tests/helpers.py`），职责混合才拆、真实重复才抽。
 
 ## 环境陷阱（Windows）
 

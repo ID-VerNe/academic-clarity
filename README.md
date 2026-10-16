@@ -137,7 +137,7 @@ scripts/run_tests.bat
 
 - **测试优先**: 所有新功能必须有对应的测试用例
 - **配置中心化**: 使用 `ConfigService` 管理配置
-- **单一职责**: 每个文件不超过 200 行
+- **单一职责与复用优先**: 不设硬性行数上限；新增代码先规划结构与接口、先检索可复用实现（`src/utils/`、`src/hooks/`、`backend/utils/`、`backend/services/`、`tests/helpers.py`），职责混合时拆分，真实重复时抽取共享逻辑
 - **并行测试**: 测试必须支持并行运行（使用 UUID 临时数据）
 
 ## 许可证

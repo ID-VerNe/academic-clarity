@@ -37,7 +37,7 @@ Run `run_tests.bat` in the root directory.
 ## 5. Coding Standards (DRY & Modular)
 - **No Hardcoded API**: All frontend requests MUST use the unified `api` client (`src/api/client.ts`).
 - **Config Centralization**: Backend services MUST use `ConfigService` for database-backed settings.
-- **Single Responsibility**: Each file should have one clear purpose. If a file exceeds 200 lines, decompose it into smaller "bricks".
+- **Single Responsibility & DRY (No Arbitrary Line Limits)**: Each module/component MUST have one clear purpose with cohesive responsibilities and clear boundaries. There is NO hard line-count limit — never split a file just to hit a number. Before writing new code: plan the structure and interfaces first, then search for and reuse existing implementations (`src/utils/`, `src/hooks/`, `backend/utils/`, `backend/services/`, `tests/helpers.py`). Decompose when responsibilities are mixed; extract shared logic when duplication is real.
 - **Recursive Rendering**: UI components handling LLM JSON must use recursive rendering with a depth limit (max 5 levels).
 
 ## 6. Testing & Quality Assurance Mandates
