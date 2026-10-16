@@ -321,7 +321,7 @@
 - [x] 批次 1 完成 + 全量测试
 - [x] 批次 2（LiteLLM 移除）完成 + 全量测试
 - [x] 批次 3（测试迁移）完成 + 全量测试
-- [x] 报告终稿 + 合并 main（merge commit 见 git log）
+- [x] 报告终稿 + 合并 main（merge commit `9aaf0d8`，--no-ff；main 合并后全量 34/34 PASS）
 
 ---
 

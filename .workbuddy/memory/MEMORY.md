@@ -15,7 +15,7 @@
 
 - **vitest React 双实例**：进程 cwd 盘符为小写 `c:\` 时，pnpm 符号链接经 realpath 解析为大写 `C:\`，同一份 `react.development.js` 被 ESM / CJS 两条路径各加载一次 → 报 `Cannot read properties of null (reading 'useState')` / `Invalid hook call`。已在 `vitest.config.ts` 规范化 cwd 盘符并显式设 `test.root`（非 Windows 自动跳过），**勿删该段**。
 - **沙箱 safe-delete**：`rm -rf <dir>` 可能被守卫拦截（SIGTERM、无输出）→ 逐文件 `rm -f` + `rmdir` 空目录可绕过。
-- **真实 LLM E2E**：必须串行跑（并行会抢同一代理配额）；server 子进程输出须落盘（`subprocess.PIPE` 不读取会阻塞子进程）；代理不可达自动 SKIP（`_proxy_reachable()` TCP 探测）。
+- **真实 LLM E2E**：必须串行跑（并行会抢同一代理配额）；用例基建在 `tests/e2e_llm_harness.py`（`LlmE2eHarness` 封装 server 子进程 / HTTP / 轮询；server 输出落盘防管道阻塞）；代理不可达自动 SKIP（`proxy_reachable()` TCP 探测）。
 - **python_embed 隔离模式**：`python310._pth` 忽略 `PYTHONPATH`；脚本/测试须显式 `sys.path.insert(0, ...)`（`tests/helpers.py` 已封装）。
 - **litellm 删除后**：其导入时的 `sys.path` 注入副作用消失（曾致 `backend.constants` / `constants` 双模块分裂）——勿依赖隐式仓库根导入。
 
@@ -23,6 +23,7 @@
 
 - 全量门禁：`scripts/run_tests.bat`（= `python_embed\python.exe tests\run_all_tests.py`；run_all_tests.py 为薄编排，逻辑在 `tests/runner.py`；34 任务并行）。
 - 前端单跑：`pnpm test`；类型检查：`pnpm lint`（tsc --noEmit）。
-- 测试共享脚手架：`tests/helpers.py`（`find_repo_root` / `add_backend_to_sys_path` / `make_temp_ws` / `server_test_client` / `cleanup_temp_artifacts` 等）、`tests/fixtures_data.py`。
+- 测试共享脚手架：`tests/helpers.py`（`find_repo_root` / `add_backend_to_sys_path` / `add_vendor_know_to_sys_path` / `make_temp_ws` / `make_temp_db` / `remove_db_files` / `poll_until` / `server_test_client` / `cleanup_temp_artifacts` / `FakeDb` / `FakeCrossrefClient` / `fake_completion_response`）、`tests/fixtures_data.py`、`tests/e2e_llm_harness.py`。
+- **测试写法基线（2026-10-16 全量迁移后）**：32 个测试文件已全部接入共享基础设施——**勿再写路径 while 样板**（引导 = `sys.path.insert(0, dirname(dirname(abspath(__file__))))` + `from helpers import add_backend_to_sys_path`，know 家族用 `add_vendor_know_to_sys_path`）；**勿再把临时 DB/ws 落 cwd 或源码树**（用 `make_temp_ws`/`make_temp_db`，系统 temp + `ac_test_` 前缀供调度器清理）；server 测试用 `server_test_client(port, ws)`（类级共享时 lifecycle 放 setUpClass）；LLM mock 用 `fake_completion_response` + `patch('services.ai_service._make_client')`。
 - `src/tests/setup.ts` 已 mock：`scrollIntoView` / `scrollTo` / `clipboard` / `Range.getBoundingClientRect` / `URL.createObjectURL` / `fetch().blob`。
 - 真实 LLM E2E 门控：`AC_E2E_LLM=1`（默认跳过）。
