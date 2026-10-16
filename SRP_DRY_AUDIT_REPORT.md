@@ -295,7 +295,7 @@
 - 物理删除 `python_embed/Lib/site-packages/litellm` + `litellm-1.82.1.dist-info`；验证 `import litellm` → ModuleNotFoundError；`import server` 正常
 - 全量测试 **34/34 PASS**（137.70s，无 litellm 环境）
 
-### 批次 3 — 测试样板全量迁移（commit 见 git log）
+### 批次 3 — 测试样板全量迁移（commit `2297ded`）
 
 - 32 个测试文件全部迁移到共享基础设施（+425/−1136，净减 ~711 行）：
   - **T-01 路径引导**（32/32）：8 行 while 样板 → 4 行标准（`tests/helpers.py` 的 `add_backend_to_sys_path` / `add_vendor_know_to_sys_path`）
@@ -308,10 +308,20 @@
 - 迁移质量验证：32 文件逐个实跑全绿 → 全量 **34/34 PASS**（44.22s）→ E2E 终验收 **tex 4/4（29.4s）+ extraction 2/2（19.5s）**
 - 执行说明：F7a/F7b 代理因 429 限流中断（详见 §7）；中断前成果经核验完整，遗留 12 文件（security 4 + unit 8）由主代理按同一规范续完
 
+### 最终验收
+
+| 门禁 | 结果 |
+|---|---|
+| 全量测试（`run_all_tests.py`，34 任务并行） | **34/34 PASS**（44.22s） |
+| E2E 实跑（`AC_E2E_LLM=1`，串行防配额竞争） | tex **4/4**（29.4s）+ extraction **2/2**（19.5s） |
+| 测试文件迁移完整性 | 32/32 文件（用例数不减、断言保持、逐个实跑绿） |
+| LiteLLM 残留 | 全库零引用；物理包已删；无 litellm 环境 `import server` 正常 |
+| 工作区卫生 | 无未跟踪残留；测试临时资源落系统 temp（`ac_test_` 前缀，调度器可清理） |
+
 - [x] 批次 1 完成 + 全量测试
 - [x] 批次 2（LiteLLM 移除）完成 + 全量测试
 - [x] 批次 3（测试迁移）完成 + 全量测试
-- [ ] 报告终稿 + 合并 main
+- [x] 报告终稿 + 合并 main（merge commit 见 git log）
 
 ---
 
