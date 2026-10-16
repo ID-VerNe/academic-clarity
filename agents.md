@@ -14,7 +14,7 @@ We use a layered testing strategy to ensure robustness:
 | :--- | :--- | :--- | :--- |
 | **Unit** | Python `unittest` | `.\python_embed\python.exe tests/unit/test_database.py` | DB CRUD, Text cleaning |
 | **Security** | Custom Audit | `.\python_embed\python.exe tests/security/test_final_audit.py` | Path traversal, SQL Injection |
-| **Integration**| Real API Test | `.\python_embed\python.exe tests/system/test_real_world.py` | OCR -> JSON -> DB Full Cycle |
+| **Integration**| Real API Test | `.\python_embed\python.exe tests/integration/test_api_upload_flow.py` | Cross-module API flows |
 | **Build** | Vite/TSC | `pnpm build` | TS Types, Frontend bundling |
 
 ## 3. High-Performance Testing (Parallel & Isolated)
@@ -26,7 +26,7 @@ Run `run_tests.bat` in the root directory.
     - `tests/system/`: Real-world environment and edge case validation.
 - **Isolation**: Each test process automatically creates a unique, UUID-based temporary database and workspace. 
 - **Concurrency**: Tests run in parallel using multiple CPU cores to maximize speed.
-- **Auto-Cleanup**: All temporary artifacts (test databases, temp folders) are physically deleted immediately after completion.
+- **Auto-Cleanup**: All temporary artifacts (prefixed `ac_test_`, placed under the system temp dir) are physically deleted immediately after completion; `tests/helpers.py:cleanup_temp_artifacts()` also covers legacy prefixes.
 
 
 ## 4. Multi-Dimensional Knowledge Graph (Intelligence Insight)
@@ -43,6 +43,7 @@ Run `run_tests.bat` in the root directory.
 ## 6. Testing & Quality Assurance Mandates
 - **Exhaustive UI Testing**: 100% of defined event handlers (`onClick`, `onChange`, `onBlur`, `onKeyDown`, etc.) MUST be covered by Vitest/RTL tests. No interactive element is considered "finished" without a behavioral test.
 - **Categorized Test Storage**: All new tests MUST be placed in their respective functional subdirectory. No raw script files allowed in `tests/` root.
-- **Path Robustness**: Test scripts MUST implement dynamic path discovery to locate the `backend/` directory regardless of nesting depth within `tests/`.
+- **Path Robustness**: Test scripts MUST use the shared bootstrap from `tests/helpers.py` (`add_backend_to_sys_path()` / `add_vendor_know_to_sys_path()`). No ad-hoc `sys.path` manipulation.
+- **Shared Test Infrastructure**: Temp resources (`make_temp_ws` / `make_temp_db` / `remove_db_files`), server scaffolding (`server_test_client`), shared doubles (`FakeDb` / `FakeCrossrefClient` / `fake_completion_response`) and the real-LLM E2E harness (`e2e_llm_harness.LlmE2eHarness`) MUST be reused from `tests/helpers.py` / `tests/e2e_llm_harness.py`. New temp artifacts MUST use the `ac_test_` prefix.
 - **Regression Prevention**: Any bug fixed MUST be accompanied by a new test case in the `tests/` or `src/**/*.test.tsx` files.
 - **Parallel Priority**: All new tests MUST be designed to run in parallel without resource conflicts (using unique UUID-based temp data).

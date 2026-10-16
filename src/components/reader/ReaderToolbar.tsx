@@ -1,16 +1,17 @@
 import React from 'react';
 import { ChevronLeft, Sparkles, FileText } from 'lucide-react';
+import { ViewMode } from '../../types';
 
 interface ReaderToolbarProps {
   onBack: () => void;
-  viewMode: 'split' | 'pdf' | 'markdown';
-  setViewMode: (mode: 'split' | 'pdf' | 'markdown') => void;
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
   title: string;
   /** 主 CTA：聚焦右侧对话并给出默认分析问题（UX-04） */
   onAnalyze: () => void;
 }
 
-const VIEW_MODES: { key: 'pdf' | 'split' | 'markdown'; label: string; title: string }[] = [
+const VIEW_MODES: { key: ViewMode; label: string; title: string }[] = [
   { key: 'pdf', label: 'PDF', title: '只显示 PDF 原页' },
   { key: 'split', label: '分栏', title: 'PDF 与文本对照' },
   { key: 'markdown', label: '文本', title: '只显示识别文本' },

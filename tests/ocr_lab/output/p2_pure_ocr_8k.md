@@ -1,1 +1,0 @@
-Error: litellm.BadRequestError: OpenAIException - max_tokens (8192) have exceeded max_seq_len (8192) limit.

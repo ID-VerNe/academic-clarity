@@ -1,130 +1,60 @@
+"""全量测试调度器：并行执行 + 串行系统测试 → 清理 → 汇总（执行细节见 runner.py）。"""
 import os
 import sys
-import subprocess
+import tempfile
 import time
-import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-def run_python_test(test_path, python_exe, backend_dir):
-    """运行指定的 Python 测试文件，支持相对路径"""
-    start = time.time()
-    try:
-        env = os.environ.copy()
-        env["PYTHONPATH"] = backend_dir + os.pathsep + env.get("PYTHONPATH", "")
-        # 获取测试文件所在的目录，用于相对导入
-        test_dir = os.path.dirname(test_path)
+# 嵌入式 python（python310._pth 隔离模式）下脚本目录不进 sys.path，手动引导
+TESTS_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, TESTS_ROOT)
 
-        proc = subprocess.run(
-            [python_exe, test_path],
-            capture_output=True, text=True, encoding='cp437', errors='replace', env=env, timeout=600
-        )
-        return {
-            "name": f"Py: {os.path.relpath(test_path, os.path.dirname(backend_dir))}", 
-            "success": proc.returncode == 0, 
-            "stdout": proc.stdout, 
-            "stderr": proc.stderr, 
-            "duration": time.time() - start
-        }
-    except Exception as e:
-        return {"name": test_path, "success": False, "stdout": "", "stderr": str(e), "duration": 0}
-
-def run_frontend_lint(root_dir):
-    start = time.time()
-    print("  [Spawn] Starting Frontend Lint (pnpm lint)...")
-    try:
-        proc = subprocess.run("pnpm lint", cwd=root_dir, capture_output=True, text=True,
-                              encoding='utf-8', errors='replace', shell=True, timeout=600)
-        return {"name": "FE: TSC Lint", "success": proc.returncode == 0, "stdout": proc.stdout, "stderr": proc.stderr, "duration": time.time() - start}
-    except Exception as e:
-        return {"name": "FE Lint", "success": False, "stdout": "", "stderr": str(e), "duration": 0}
-
-def run_frontend_tests(root_dir):
-    start = time.time()
-    print("  [Spawn] Starting Frontend UI Tests (pnpm test)...")
-    try:
-        proc = subprocess.run("pnpm test", cwd=root_dir, capture_output=True, text=True,
-                              encoding='utf-8', errors='replace', shell=True, timeout=600)
-        return {"name": "FE: UI Logic (Vitest)", "success": proc.returncode == 0, "stdout": proc.stdout, "stderr": proc.stderr, "duration": time.time() - start}
-    except Exception as e:
-        return {"name": "FE UI Tests", "success": False, "stdout": "", "stderr": str(e), "duration": 0}
-
-def cleanup_temp_files(tests_root):
-    """递归清理测试产生的临时文件"""
-    prefixes = ["test_db_", "test_workspace_", "test_audit_", "test_ws_api_", "test_ws_tex",
-                "test_ws_doi", "test_ws_know", "test_ws_know_sec", "test_ws_ext"]
-    for root, dirs, files in os.walk(tests_root):
-        for item in dirs + files:
-            if any(prefix in item for prefix in prefixes):
-                path = os.path.join(root, item)
-                try:
-                    if os.path.isdir(path): shutil.rmtree(path, ignore_errors=True)
-                    else: os.remove(path)
-                except: pass
+from helpers import cleanup_temp_artifacts  # noqa: E402
+from runner import collect_py_tests, run_frontend_lint, run_frontend_tests, run_python_test  # noqa: E402
 
 def run_suite():
-    TESTS_ROOT = os.path.dirname(os.path.abspath(__file__))
-    ROOT_DIR = os.path.dirname(TESTS_ROOT)
-    BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
-    python_exe = os.path.join(ROOT_DIR, "python_embed", "python.exe")
-    if not os.path.exists(python_exe): python_exe = sys.executable
+    root_dir = os.path.dirname(TESTS_ROOT)
+    backend_dir = os.path.join(root_dir, "backend")
+    python_exe = os.path.join(root_dir, "python_embed", "python.exe")
+    if not os.path.exists(python_exe):
+        python_exe = sys.executable
 
-    # 1. 递归收集所有测试文件
-    all_py_tests = []
-    for root, dirs, files in os.walk(TESTS_ROOT):
-        for f in files:
-            if f.startswith("test_") and f.endswith(".py"):
-                all_py_tests.append(os.path.join(root, f))
-    
-    # 2. 识别需要串行的系统测试
-    real_world_test = next((t for t in all_py_tests if "test_real_world.py" in t), None)
-    if real_world_test: all_py_tests.remove(real_world_test)
-
-    print("====================================================")
-    print(f"   ACADEMIC CLARITY CATEGORIZED PARALLEL TESTS")
-    print("====================================================")
-    
-    results = {"passed": 0, "failed": 0, "failed_list": []}
+    all_py_tests = collect_py_tests(TESTS_ROOT)
+    real_world = next((t for t in all_py_tests if "test_real_world.py" in t), None)
+    if real_world:
+        all_py_tests.remove(real_world)
+    print("=" * 52)
+    print("   ACADEMIC CLARITY CATEGORIZED PARALLEL TESTS")
+    print("=" * 52)
+    results = {"passed": 0, "failed": 0}
     start_total = time.time()
 
-    # 并行池：封顶 8——server 导入 ~13s/进程，20 核全开反而因
-    # 导入争抢（磁盘/内存抖动）使慢测试超时（实测 22 worker 时
-    # 15s 的单测都被拖到 180s+）。
-    # timeout=600：8 路并行下 know 家族测试实测系统性慢 ~3.5 倍
-    # （CPU 配额争抢），95s 的单文件可被拖到 330s+；600s 仍能
-    # 抓住真挂死（10 分钟无产出），只是不再拿时钟赛跑当门禁。
-    max_workers = min(os.cpu_count() + 2, 8)
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(run_frontend_lint, ROOT_DIR),
-            executor.submit(run_frontend_tests, ROOT_DIR)
-        ]
-        for test_path in all_py_tests:
-            futures.append(executor.submit(run_python_test, test_path, python_exe, BACKEND_DIR))
-        
-        for future in as_completed(futures):
-            res = future.result()
-            if res["success"]:
-                print(f"  [PASS] {res['name']} ({res['duration']:.2f}s)")
-                results["passed"] += 1
-            else:
-                print(f"  [FAIL] {res['name']} ({res['duration']:.2f}s)")
-                results["failed"] += 1
-                results["failed_list"].append(res["name"])
-                print(f"--- OUTPUT for {res['name']} ---\n{res['stdout']}\n{res['stderr']}\n---------------------------------")
+    def record(res):
+        results["passed" if res["success"] else "failed"] += 1
+        print(f"  [{'PASS' if res['success'] else 'FAIL'}] {res['name']} ({res['duration']:.2f}s)")
+        if not res["success"]:
+            print(f"--- OUTPUT for {res['name']} ---\n{res['stdout']}\n{res['stderr']}\n---------------------------------")
 
-    # 串行阶段
-    if real_world_test:
-        print(f"Running System Test: {os.path.basename(real_world_test)} (Serial)...")
-        res = run_python_test(real_world_test, python_exe, BACKEND_DIR)
-        if res["success"]:
-            print(f"  [PASS] {res['name']} ({res['duration']:.2f}s)"); results["passed"] += 1
-        else:
-            print(f"  [FAIL] {res['name']} ({res['duration']:.2f}s)"); results["failed"] += 1; results["failed_list"].append(res["name"])
+    try:
+        # 并行池封顶 8：server 导入 ~13s/进程，20 核全开反因导入争抢拖垮慢测试
+        with ProcessPoolExecutor(max_workers=min(os.cpu_count() + 2, 8)) as executor:
+            futures = [executor.submit(f, root_dir) for f in (run_frontend_lint, run_frontend_tests)]
+            futures += [executor.submit(run_python_test, t, python_exe, backend_dir, root_dir)
+                        for t in all_py_tests]
+            for future in as_completed(futures):
+                record(future.result())
+        if real_world:
+            print(f"Running System Test: {os.path.basename(real_world)} (Serial)...")
+            record(run_python_test(real_world, python_exe, backend_dir, root_dir))
+    finally:
+        removed = cleanup_temp_artifacts([TESTS_ROOT, root_dir, tempfile.gettempdir()])
+        print(f"  [Cleanup] Removed {removed} temp artifact(s)")
 
-    cleanup_temp_files(TESTS_ROOT)
-    duration = time.time() - start_total
-    print(f"\n====================================================\nTotal Tasks: {results['passed'] + results['failed']} | Passed: {results['passed']} | Failed: {results['failed']} | Time: {duration:.2f}s\n====================================================")
+    print(f"\n====================================================\n"
+          f"Total Tasks: {results['passed'] + results['failed']} | Passed: {results['passed']} | Failed: {results['failed']} | Time: {time.time() - start_total:.2f}s\n"
+          f"====================================================")
     sys.exit(0 if results["failed"] == 0 else 1)
+
 
 if __name__ == "__main__":
     run_suite()

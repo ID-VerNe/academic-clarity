@@ -10,32 +10,16 @@ import os
 import sys
 import json
 import unittest
-import uuid
 import shutil
-from unittest.mock import patch, AsyncMock
 
-# 强力隔离环境：在导入 server 之前先伪造 argv
-unique_id = uuid.uuid4().hex
-module_ws = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), f"test_ws_know_sec_{unique_id}"))
-if not os.path.exists(module_ws):
-    os.makedirs(module_ws)
-
-sys.argv = [sys.argv[0], "38395", module_ws]
-
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current:
-        break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
-
-from fastapi.testclient import TestClient  # noqa: E402
-import server  # noqa: E402
-from server import app, state  # noqa: E402
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import (  # noqa: E402
+    add_backend_to_sys_path,
+    make_temp_ws,
+    server_test_client,
+)
+add_backend_to_sys_path()
 
 OCR_MD = """# Paper
 
@@ -52,27 +36,28 @@ INSIGHT = json.dumps({
 
 
 class TestKnowledgeSearchSecurity(unittest.TestCase):
+    # 类级共享 TestClient：lifespan（worker 启动）只跑一次，
+    # 每测试仍独立 workspace + state.initialize 隔离。
     @classmethod
     def setUpClass(cls):
-        cls._client_cm = TestClient(app)
-        cls.client = cls._client_cm.__enter__()
+        cls.ws = make_temp_ws()
+        cls._cm = server_test_client(38395, cls.ws)
+        cls.client, cls.state = cls._cm.__enter__()
 
     @classmethod
     def tearDownClass(cls):
-        cls._client_cm.__exit__(None, None, None)
-        shutil.rmtree(module_ws, ignore_errors=True)
+        cls._cm.__exit__(None, None, None)
+        shutil.rmtree(cls.ws, ignore_errors=True)
 
     def setUp(self):
-        self.test_ws = os.path.abspath(
-            os.path.join(os.path.dirname(__file__),
-                         f"test_ws_know_sec_case_{uuid.uuid4().hex}"))
-        os.makedirs(self.test_ws, exist_ok=True)
-        state.initialize(self.test_ws)
-        doc_id = state.db.add_document("s.pdf", "/raw/s.pdf",
-                                       os.path.join(self.test_ws, "s.pdf"))
-        state.db.update_document_ocr(doc_id, "completed", markdown=OCR_MD,
-                                     title="P2P Energy Trading Survey")
-        state.db.add_document_metadata(doc_id, "Basic Insight", INSIGHT)
+        # 每测试独立 workspace（系统 temp，ac_test_ 前缀）
+        self.test_ws = make_temp_ws()
+        self.state.initialize(self.test_ws)
+        doc_id = self.state.db.add_document("s.pdf", "/raw/s.pdf",
+                                            os.path.join(self.test_ws, "s.pdf"))
+        self.state.db.update_document_ocr(doc_id, "completed", markdown=OCR_MD,
+                                          title="P2P Energy Trading Survey")
+        self.state.db.add_document_metadata(doc_id, "Basic Insight", INSIGHT)
         resp = self.client.post(f"/knowledge/ingest/{doc_id}")
         self.assertEqual(resp.status_code, 200)
         self.doc_id = doc_id

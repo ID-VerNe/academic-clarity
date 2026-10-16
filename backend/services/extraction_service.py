@@ -1,10 +1,11 @@
 """提取维度管理与批量提取（Phase 3，借鉴 litrev-extract 模式）。
 
-机制映射：维度定义存 DB（替代 litrev YAML config）；断点续跑 =
-select_batch_candidates 存在性检查（litrev state.py 等价物）；并发 =
-task_hub + 模块级 Semaphore(3) 兜底（替代 litrev RateLimiter）；
-error-JSON 转异常（ai_service 单 key 失败路径返回错误 JSON 而非抛错，
-不转换会把错误当提取结果落库——Phase 3 质量闸口 R6）。
+机制映射：维度定义存 DB（替代 litrev YAML config；CRUD 走 Database，
+本层不再裸写 SQL，B-SRP-14）；断点续跑 = select_batch_candidates 存在性
+检查（litrev state.py 等价物）；并发 = task_hub + 模块级 Semaphore(3)
+兜底（替代 litrev RateLimiter）；error-JSON 转异常（ai_service 单 key
+失败路径返回错误 JSON 而非抛错，不转换会把错误当提取结果落库——Phase 3
+质量闸口 R6）。
 """
 import asyncio, json, sqlite3, uuid
 
@@ -35,18 +36,11 @@ def validate_dimension(dim: dict) -> dict:
 
 
 def list_dimensions(db) -> list:
-    with db.get_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        return [dict(r) for r in conn.execute(
-            "SELECT * FROM extraction_dimensions ORDER BY created_at, id").fetchall()]
+    return db.list_dimensions()
 
 
 def get_dimension(db, dimension_id) -> dict | None:
-    with db.get_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM extraction_dimensions WHERE id = ?",
-                           (dimension_id,)).fetchone()
-        return dict(row) if row else None
+    return db.get_dimension(dimension_id)
 
 
 def save_dimension(db, dim: dict) -> dict:
@@ -55,16 +49,8 @@ def save_dimension(db, dim: dict) -> dict:
     if not v['id']:
         v['id'] = uuid.uuid4().hex[:12]
     try:
-        with db.safe_write() as cursor:
-            cursor.execute('''
-                INSERT INTO extraction_dimensions
-                    (id, label, prompt, system_prompt, enabled, updated_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(id) DO UPDATE SET
-                    label=excluded.label, prompt=excluded.prompt,
-                    system_prompt=excluded.system_prompt, enabled=excluded.enabled,
-                    updated_at=CURRENT_TIMESTAMP
-            ''', (v['id'], v['label'], v['prompt'], v['system_prompt'], v['enabled']))
+        db.save_dimension(v['id'], v['label'], v['prompt'],
+                          v['system_prompt'], v['enabled'])
     except sqlite3.IntegrityError:
         raise DimensionError(f"label '{v['label']}' 已存在")
     return v
@@ -72,21 +58,16 @@ def save_dimension(db, dim: dict) -> dict:
 
 def delete_dimension(db, dimension_id) -> bool:
     """只删维度定义；已产生的 metadata 行保留（失去维度关联但不丢数据）。"""
-    with db.safe_write() as cursor:
-        cursor.execute("DELETE FROM extraction_dimensions WHERE id = ?", (dimension_id,))
-        return cursor.rowcount > 0
+    return db.delete_dimension(dimension_id)
 
 
 def select_batch_candidates(db, dimension_id, doc_ids=None, force=False):
     """返回 (to_run, skipped)。跳过：非 completed / 无 markdown / 已有结果
     （force 时忽略已有结果检查）；doc_ids 非空时只在该集合内枚举。"""
-    with db.get_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        docs = [dict(r) for r in conn.execute(
-            "SELECT id, ocr_status, ocr_markdown FROM documents").fetchall()]
-        done = {r[0] for r in conn.execute(
-            "SELECT DISTINCT doc_id FROM document_metadata WHERE dimension_id = ?",
-            (dimension_id,)).fetchall()}
+    docs = db.fetch_all("SELECT id, ocr_status, ocr_markdown FROM documents")
+    done = {r["doc_id"] for r in db.fetch_all(
+        "SELECT DISTINCT doc_id FROM document_metadata WHERE dimension_id = ?",
+        (dimension_id,))}
     to_run, skipped = [], []
     for d in docs:
         if doc_ids and d['id'] not in doc_ids:
@@ -121,13 +102,11 @@ async def run_dimension_extraction(doc_id: int, dimension_id: str, db):
 
 def collect_export_rows(db, dimension_id) -> list:
     """JOIN documents，返回 [{doc_id, filename, title, data(dict), created_at}]。"""
-    with db.get_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute('''
-            SELECT m.doc_id, m.content_json, m.created_at, d.filename, d.title
-            FROM document_metadata m JOIN documents d ON d.id = m.doc_id
-            WHERE m.dimension_id = ? ORDER BY m.doc_id
-        ''', (dimension_id,)).fetchall()
+    rows = db.fetch_all('''
+        SELECT m.doc_id, m.content_json, m.created_at, d.filename, d.title
+        FROM document_metadata m JOIN documents d ON d.id = m.doc_id
+        WHERE m.dimension_id = ? ORDER BY m.doc_id
+    ''', (dimension_id,))
     out = []
     for r in rows:
         try:

@@ -1,5 +1,24 @@
 import re
 
+def strip_ref_det_tags(text, keep_text=True):
+    """统一清洗 DeepSeek-OCR 的 <|ref|>…<|/ref|><|det|>…<|/det|> 标签（B-DRY-07）。
+
+    keep_text=True：整对标签折叠为 ref 内的文字（det 坐标丢弃）；
+    False：整对标签连同文字一并删除。随后清除所有残留单边标签
+    （宽松匹配 <ref|> / <|ref|> / <|/ref|> 等变体）。
+    """
+    if not text:
+        return ""
+    if keep_text:
+        pattern = r'<\|ref\|>(.*?)<\|/ref\|><\|det\|>.*?<\|/det\|>'
+        cleaned = re.sub(pattern, r'\1', text, flags=re.DOTALL)
+    else:
+        pattern = r'<\|ref\|>.*?<\|/ref\|><\|det\|>.*?<\|/det\|>'
+        cleaned = re.sub(pattern, '', text, flags=re.DOTALL)
+    cleaned = re.sub(r'<\|?/?ref\|>', '', cleaned)
+    cleaned = re.sub(r'<\|?/?det\|>', '', cleaned)
+    return cleaned
+
 def clean_ocr_markdown(md_text):
     """
     整合自官方 DeepSeek-OCR 的高保真后处理逻辑。
@@ -10,15 +29,9 @@ def clean_ocr_markdown(md_text):
     if not md_text:
         return ""
 
-    # 1. 提取 ref 标签内的文字，删除 det 标签及其坐标
-    # DeepSeek-OCR 格式: <|ref|>文字内容<|/ref|><|det|>[[x1,y1,x2,y2]]<|/det|>
-    # 保留文字内容，删除整个标签对
-    pattern = r'<\|ref\|>(.*?)<\|/ref\|><\|det\|>.*?<\|/det\|>'
-    cleaned = re.sub(pattern, r'\1', md_text, flags=re.DOTALL)
-
-    # 2. 清理可能残留的单边标签
-    cleaned = re.sub(r'<\|?/?ref\|>', '', cleaned)
-    cleaned = re.sub(r'<\|?/?det\|>', '', cleaned)
+    # 1+2. DeepSeek-OCR 格式: <|ref|>文字内容<|/ref|><|det|>[[x1,y1,x2,y2]]<|/det|>
+    # 保留文字内容，删除整个标签对；残留单边标签一并清理（B-DRY-07 单一实现）
+    cleaned = strip_ref_det_tags(md_text, keep_text=True)
 
     # 3. 转换 LaTeX 学术符号为易读符号
     cleaned = cleaned.replace(r'\coloneqq', ':=').replace(r'\eqqcolon', '=:').replace(r'\approx', '≈')

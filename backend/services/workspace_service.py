@@ -1,6 +1,14 @@
 import os
 import asyncio
+
 from database import Database
+from utils.logger import core_logger
+
+try:
+    from backend.constants import FileConfig
+except ImportError:
+    from constants import FileConfig
+
 
 class WorkspaceService:
     def __init__(self, workspace_path, db: Database):
@@ -12,8 +20,9 @@ class WorkspaceService:
         同步扫描工作区目录
         Returns: list of (doc_id, full_path) for NEW files.
         """
-        print(f"[Workspace] Scanning: {self.workspace_path}")
-        physical_files = [f for f in os.listdir(self.workspace_path) if f.lower().endswith(('.pdf', '.tex', '.zip'))]
+        core_logger.info(f"[Workspace] Scanning: {self.workspace_path}")
+        physical_files = [f for f in os.listdir(self.workspace_path)
+                          if f.lower().endswith(FileConfig.SUPPORTED_EXTS)]
         db_docs = self.db.get_all_documents()
         db_filenames = {d['filename'] for d in db_docs}
 
@@ -23,37 +32,13 @@ class WorkspaceService:
                 full_path = os.path.join(self.workspace_path, filename)
                 doc_id = self.db.add_document(filename, full_path, full_path)
                 new_tasks.append((doc_id, full_path))
-                print(f"  [Sync] New document indexed: {filename}")
+                core_logger.info(f"  [Sync] New document indexed: {filename}")
 
         return new_tasks
 
     async def async_scan_and_sync(self):
         """
-        异步扫描工作区目录，避免阻塞事件循环
+        异步扫描工作区目录，避免阻塞事件循环（B-DRY-01：to_thread 单行包装）
         Returns: list of (doc_id, full_path) for NEW files.
         """
-        print(f"[Workspace] Async scanning: {self.workspace_path}")
-
-        loop = asyncio.get_running_loop()
-
-        physical_files = await loop.run_in_executor(
-            None,
-            lambda: [f for f in os.listdir(self.workspace_path) if f.lower().endswith(('.pdf', '.tex', '.zip'))]
-        )
-
-        db_docs = await loop.run_in_executor(None, self.db.get_all_documents)
-        db_filenames = {d['filename'] for d in db_docs}
-
-        new_tasks = []
-        for filename in physical_files:
-            if filename not in db_filenames:
-                full_path = os.path.join(self.workspace_path, filename)
-                loop2 = asyncio.get_running_loop()
-                doc_id = await loop2.run_in_executor(
-                    None,
-                    lambda fn=filename, fp=full_path: self.db.add_document(fn, fp, fp)
-                )
-                new_tasks.append((doc_id, full_path))
-                print(f"  [Sync] New document indexed: {filename}")
-
-        return new_tasks
+        return await asyncio.to_thread(self.scan_and_sync)

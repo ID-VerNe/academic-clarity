@@ -6,19 +6,13 @@
 import os
 import sys
 import unittest
-import uuid
 import shutil
 import zipfile
 
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current:
-        break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path, make_temp_ws  # noqa: E402
+add_backend_to_sys_path()
 
 from services.tex_service import (  # noqa: E402
     TexConversionError,
@@ -30,10 +24,8 @@ from services.tex_service import (  # noqa: E402
 
 class TestTexZipSlip(unittest.TestCase):
     def setUp(self):
-        self.tmp = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            f"test_tex_sec_{uuid.uuid4().hex}",
-        )
+        # 临时目录落系统 temp（ac_test_ 前缀，调度器可清理）
+        self.tmp = make_temp_ws("ac_test_tex_sec")
         self.dest = os.path.join(self.tmp, "dest")
         os.makedirs(self.dest)
 

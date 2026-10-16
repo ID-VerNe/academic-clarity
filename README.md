@@ -84,16 +84,14 @@ LLM_MODEL = "gpt-4.1"
 ```
 academic-clarity/
 ├── backend/                 # 后端服务
-│   ├── core/               # 核心组件
-│   │   └── task_manager.py # 任务队列管理器
-│   ├── services/           # 业务服务
-│   │   ├── ai_service.py   # AI 服务调用
-│   │   ├── config_service.py # 配置管理
-│   │   ├── ocr_service.py  # OCR 处理服务
-│   │   └── workspace_service.py # 工作空间管理
-│   ├── utils/              # 工具函数
+│   ├── core/               # 核心组件（任务队列 / 优先级队列）
+│   ├── db/                 # 数据库 schema 与查询
+│   ├── routes/             # API 路由（按域拆分）
+│   ├── services/           # 业务服务（AI 调用 / OCR / 提取 / 配置）
+│   ├── utils/              # 工具函数（缓存 / 日志 / 指标 / WebSocket）
 │   ├── vendor/             # 第三方依赖
-│   ├── server.py           # FastAPI 入口
+│   ├── server.py           # FastAPI 装配入口
+│   ├── app_state.py        # 全局状态单例
 │   └── config.py.example   # 配置模板
 ├── electron/               # Electron 主进程
 ├── src/                    # 前端源代码
@@ -108,7 +106,10 @@ academic-clarity/
 │   ├── unit/               # 单元测试
 │   ├── integration/        # 集成测试
 │   ├── security/           # 安全审计
-│   └── system/             # 系统测试
+│   ├── system/             # 系统测试（含真实 LLM E2E，默认跳过）
+│   ├── helpers.py          # 共享测试基础设施（路径引导 / 临时资源 / 脚手架）
+│   ├── fixtures_data.py    # 共享夹具
+│   └── e2e_llm_harness.py  # 真实 LLM E2E harness
 ├── scripts/                # 运行脚本
 │   ├── run_app.bat
 │   └── run_tests.bat
@@ -123,7 +124,7 @@ academic-clarity/
 |------|------|------|
 | 单元测试 | Python unittest | `python tests/unit/test_database.py` |
 | 安全测试 | 自定义审计 | `python tests/security/test_final_audit.py` |
-| 集成测试 | 真实 API | `python tests/system/test_real_world.py` |
+| 集成测试 | 真实 API | `python tests/integration/test_api_upload_flow.py` |
 | 构建测试 | Vite/TSC | `pnpm build` |
 
 运行全部测试：

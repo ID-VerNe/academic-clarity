@@ -2,36 +2,22 @@ import os
 import unittest
 import sqlite3
 import sys
-import uuid
 import json
 
-# Add backend to path for imports
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current: break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path, make_temp_db, remove_db_files  # noqa: E402
+add_backend_to_sys_path()
 
 from database import Database
 
 class TestDatabase(unittest.TestCase):
     def setUp(self):
-        self.db_path = f"test_db_{uuid.uuid4().hex}.db"
+        self.db_path = make_temp_db()
         self.db = Database(self.db_path)
 
     def tearDown(self):
-        if os.path.exists(self.db_path):
-            try:
-                os.remove(self.db_path)
-                # Also remove WAL files if they exist
-                for ext in ["-wal", "-shm"]:
-                    if os.path.exists(self.db_path + ext):
-                        os.remove(self.db_path + ext)
-            except:
-                pass
+        remove_db_files(self.db_path)
 
     def test_add_get_document(self):
         doc_id = self.db.add_document("test.pdf", "orig/path", "stored/path")
@@ -73,17 +59,11 @@ class TestDoiColumnsMigration(unittest.TestCase):
     """Phase 1：doi/doi_source/bibtex 列迁移与写入。"""
 
     def setUp(self):
-        self.db_path = f"test_db_{uuid.uuid4().hex}.db"
+        self.db_path = make_temp_db()
         self.db = Database(self.db_path)
 
     def tearDown(self):
-        for suffix in ["", "-wal", "-shm"]:
-            p = self.db_path + suffix
-            if os.path.exists(p):
-                try:
-                    os.remove(p)
-                except OSError:
-                    pass
+        remove_db_files(self.db_path)
 
     def test_new_db_has_doi_columns_null_by_default(self):
         doc_id = self.db.add_document("a.pdf", "o", "s")
@@ -98,32 +78,29 @@ class TestDoiColumnsMigration(unittest.TestCase):
     def test_update_document_doi_dynamic_set(self):
         doc_id = self.db.add_document("a.pdf", "o", "s")
 
-        # 仅 doi
-        self.db.update_document_doi(doc_id, doi="10.1234/abc")
-        doc = self.db.get_document(doc_id)
-        self.assertEqual(doc["doi"], "10.1234/abc")
-        self.assertIsNone(doc["doi_source"])
-
-        # doi + source
-        self.db.update_document_doi(doc_id, doi_source="crossref")
-        doc = self.db.get_document(doc_id)
-        self.assertEqual(doc["doi"], "10.1234/abc")
-        self.assertEqual(doc["doi_source"], "crossref")
-
-        # bibtex
-        self.db.update_document_doi(doc_id, bibtex="@article{x}")
-        doc = self.db.get_document(doc_id)
-        self.assertEqual(doc["bibtex"], "@article{x}")
-
-        # 全 None → no-op，不炸不清数据
-        self.db.update_document_doi(doc_id)
-        doc = self.db.get_document(doc_id)
-        self.assertEqual(doc["doi"], "10.1234/abc")
-        self.assertEqual(doc["doi_source"], "crossref")
+        # (场景, update kwargs, 期望列值)：同一 doc 上按序叠加
+        steps = [
+            ("仅 doi", {"doi": "10.1234/abc"},
+             {"doi": "10.1234/abc", "doi_source": None}),
+            ("doi + source", {"doi_source": "crossref"},
+             {"doi": "10.1234/abc", "doi_source": "crossref"}),
+            ("bibtex", {"bibtex": "@article{x}"}, {"bibtex": "@article{x}"}),
+            ("全 None → no-op", {},
+             {"doi": "10.1234/abc", "doi_source": "crossref"}),
+        ]
+        for name, kwargs, expected in steps:
+            with self.subTest(scenario=name):
+                self.db.update_document_doi(doc_id, **kwargs)
+                doc = self.db.get_document(doc_id)
+                for col, value in expected.items():
+                    if value is None:
+                        self.assertIsNone(doc[col])
+                    else:
+                        self.assertEqual(doc[col], value)
 
     def test_legacy_db_without_doi_columns_gets_migrated(self):
         """模拟 Phase 1 之前的旧库：无 doi 列 → 开库即补列且数据不丢。"""
-        legacy_path = f"test_db_legacy_{uuid.uuid4().hex}.db"
+        legacy_path = make_temp_db(prefix="ac_test_legacy")
         try:
             conn = sqlite3.connect(legacy_path)
             conn.execute('''
@@ -167,13 +144,7 @@ class TestDoiColumnsMigration(unittest.TestCase):
             db.update_document_doi(1, doi="10.1234/abc", doi_source="crossref")
             self.assertEqual(db.get_document(1)["doi"], "10.1234/abc")
         finally:
-            for suffix in ["", "-wal", "-shm"]:
-                p = legacy_path + suffix
-                if os.path.exists(p):
-                    try:
-                        os.remove(p)
-                    except OSError:
-                        pass
+            remove_db_files(legacy_path)
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,194 +10,168 @@ class ApiClient {
     return `http://127.0.0.1:${port}`;
   }
 
-  async syncWorkspace() {
+  /** 传输层：解析 baseUrl 并发起请求（不解析响应体，供各语义通道复用） */
+  private async fetchRaw(path: string, init?: RequestInit): Promise<Response> {
     const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/workspace/sync`, { method: 'POST' });
+    return fetch(`${baseUrl}${path}`, init);
+  }
+
+  /**
+   * 软通道：直接解析 JSON 返回。
+   * 与重构前绝大多数方法一致——不检查 res.ok，HTTP 错误由调用方按响应体处理。
+   */
+  private async request<T = any>(path: string, init?: RequestInit): Promise<T> {
+    const res = await this.fetchRaw(path, init);
     return res.json();
+  }
+
+  /**
+   * 严格通道：先解析 JSON，非 2xx 时抛错（带后端 detail）。
+   * 语义与重构前的 saveDimension 逐字一致。
+   */
+  private async requestStrict<T = any>(path: string, init?: RequestInit): Promise<T> {
+    const res = await this.fetchRaw(path, init);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`);
+    return data;
+  }
+
+  async syncWorkspace() {
+    return this.request('/workspace/sync', { method: 'POST' });
   }
 
   async getConfigs() {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/configs`);
-    return res.json();
+    return this.request('/configs');
   }
 
   async setConfig(key: string, value: string) {
-    const baseUrl = await this.getBaseUrl();
-    await fetch(`${baseUrl}/configs?key=${key}&value=${encodeURIComponent(value)}`, { method: 'POST' });
+    // 与重构前一致：不解析响应体（调用方只关心请求是否抛错）
+    await this.fetchRaw(`/configs?key=${key}&value=${encodeURIComponent(value)}`, { method: 'POST' });
   }
 
   /** 后端存活探测（页脚状态灯 / 连接反馈） */
   async health() {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/health`);
-    return res.json();
+    return this.request('/health');
   }
 
   async getDocuments() {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/documents`);
-    return res.json();
+    return this.request('/documents');
   }
 
   async getActiveTasks() {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/tasks`);
-    return res.json();
+    return this.request('/tasks');
   }
 
   /** 取消排队中/运行中的任务（UX-26） */
   async cancelTask(docId: number) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/tasks/${docId}/cancel`, { method: 'POST' });
-    return res.json();
+    return this.request(`/tasks/${docId}/cancel`, { method: 'POST' });
   }
 
   async uploadDocument(file: File) {
-    const baseUrl = await this.getBaseUrl();
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch(`${baseUrl}/documents/add`, { method: 'POST', body: formData });
-    return res.json();
+    return this.request('/documents/add', { method: 'POST', body: formData });
   }
 
   async deleteDocument(id: number) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/documents/${id}`, { method: 'DELETE' });
-    return res.json();
+    return this.request(`/documents/${id}`, { method: 'DELETE' });
   }
 
   async chat(docId: number, query: string, quotes?: string[]) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/chat`, {
+    return this.request('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ doc_id: docId, query, quotes })
+      body: JSON.stringify({ doc_id: docId, query, quotes }),
     });
-    return res.json();
   }
 
   // ── Phase 2：know 知识层 ──────────────────────────────
 
   /** 跨库检索 claims（FTS + LIKE 兜底；q 限 200 字符内） */
   async searchKnowledge(q: string, limit = 10) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/knowledge/search?q=${encodeURIComponent(q)}&limit=${limit}`);
-    return res.json();
+    return this.request(`/knowledge/search?q=${encodeURIComponent(q)}&limit=${limit}`);
   }
 
   /** 把一篇已完成 OCR + Basic Insight 的文档摄入知识库（幂等） */
   async ingestKnowledge(docId: number) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/knowledge/ingest/${docId}`, { method: 'POST' });
-    return res.json();
-  }
-
-  /** 知识库论文列表（含 claim 计数） */
-  async getKnowledgePapers() {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/knowledge/papers`);
-    return res.json();
-  }
-
-  /** 单篇论文的全部 claims */
-  async getKnowledgeClaims(paperId: string) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/knowledge/papers/${encodeURIComponent(paperId)}/claims`);
-    return res.json();
+    return this.request(`/knowledge/ingest/${docId}`, { method: 'POST' });
   }
 
   // ── Phase 3：提取维度 / 批量 / 导出 ────────────────────
 
   /** 维度列表 */
   async getDimensions() {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/extraction/dimensions`);
-    return res.json();
+    return this.request('/extraction/dimensions');
   }
 
   /** 新建/更新维度（400 校验失败 → throw 带 detail） */
   async saveDimension(dim: Partial<ExtractionDimension>) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/extraction/dimensions`, {
+    return this.requestStrict('/extraction/dimensions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(dim)
+      body: JSON.stringify(dim),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`);
-    return data;
   }
 
   async deleteDimension(id: string) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/extraction/dimensions/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    return res.json();
+    return this.request(`/extraction/dimensions/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   /** 批量提取入队（docIds 空 = 全部候选；force 重跑已有结果） */
   async runBatch(dimensionId: string, docIds?: number[], force = false): Promise<BatchRunResult> {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/extraction/batch`, {
+    return this.request('/extraction/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dimension_id: dimensionId, doc_ids: docIds || [], force })
+      body: JSON.stringify({ dimension_id: dimensionId, doc_ids: docIds || [], force }),
     });
-    return res.json();
   }
 
-  /** 导出维度结果为 Blob（组件用 createObjectURL 触发下载） */
+  /** 导出维度结果为 Blob（组件用 createObjectURL 触发下载）；失败 throw（既有文案） */
   async exportDimension(dimensionId: string, format: 'csv' | 'md') {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(
-      `${baseUrl}/documents/export?dimension_id=${encodeURIComponent(dimensionId)}&format=${format}`);
+    const res = await this.fetchRaw(
+      `/documents/export?dimension_id=${encodeURIComponent(dimensionId)}&format=${format}`);
     if (!res.ok) throw new Error(`Export failed: HTTP ${res.status}`);
     return res.blob();
   }
 
   async getMetadata(docId: number) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/documents/${docId}/metadata`);
-    return res.json();
+    return this.request(`/documents/${docId}/metadata`);
   }
 
   async extractMetadata(docId: number, label: string, prompt: string) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/documents/${docId}/metadata/extract`, {
+    return this.request(`/documents/${docId}/metadata/extract`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label, prompt })
+      body: JSON.stringify({ label, prompt }),
     });
-    return res.json();
   }
 
   async deleteMetadata(metadataId: number) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/metadata/${metadataId}`, { method: 'DELETE' });
-    return res.json();
+    return this.request(`/metadata/${metadataId}`, { method: 'DELETE' });
   }
 
   async reprocessDocument(docId: number) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/documents/${docId}/reprocess`, { method: 'POST' });
-    return res.json();
+    return this.request(`/documents/${docId}/reprocess`, { method: 'POST' });
   }
 
   async verifyDoi(docId: number) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/documents/${docId}/doi/verify`, { method: 'POST' });
-    return res.json();
+    return this.request(`/documents/${docId}/doi/verify`, { method: 'POST' });
   }
 
   async getBibtex(docId: number) {
-    const baseUrl = await this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/documents/${docId}/bibtex`);
-    return res.json();
+    return this.request(`/documents/${docId}/bibtex`);
   }
 
   async getPdfUrl(filename: string) {
     const baseUrl = await this.getBaseUrl();
     return `${baseUrl}/files/${encodeURIComponent(filename)}`;
+  }
+
+  /** 下载 PDF 二进制（PdfViewer 用 Object URL 渲染）；非 2xx 抛 `HTTP {status}`（与原裸 fetch 行为一致） */
+  async getPdfBlob(filename: string): Promise<Blob> {
+    const res = await this.fetchRaw(`/files/${encodeURIComponent(filename)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.blob();
   }
 }
 

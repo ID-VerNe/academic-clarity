@@ -8,35 +8,23 @@ import os
 import sys
 import sqlite3
 import unittest
-import uuid
 import json
 
-# Add backend to path for imports
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current: break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path, make_temp_db, remove_db_files  # noqa: E402
+add_backend_to_sys_path()
 
 from database import Database  # noqa: E402
 
 
 class TestExtractionDb(unittest.TestCase):
     def setUp(self):
-        self.db_path = f"test_db_ext_{uuid.uuid4().hex}.db"
+        self.db_path = make_temp_db()
         self.db = Database(self.db_path)
 
     def tearDown(self):
-        for suffix in ["", "-wal", "-shm"]:
-            p = self.db_path + suffix
-            if os.path.exists(p):
-                try:
-                    os.remove(p)
-                except OSError:
-                    pass
+        remove_db_files(self.db_path)
 
     def test_new_db_has_dimension_table_and_column(self):
         with self.db.get_connection() as conn:
@@ -81,7 +69,7 @@ class TestExtractionDb(unittest.TestCase):
 
     def test_legacy_db_migrated_on_open(self):
         """模拟 Phase 3 之前的旧库：无维度表、document_metadata 无 dimension_id。"""
-        legacy_path = f"test_db_ext_legacy_{uuid.uuid4().hex}.db"
+        legacy_path = make_temp_db(prefix="ac_test_legacy")
         try:
             conn = sqlite3.connect(legacy_path)
             conn.execute('''
@@ -120,13 +108,7 @@ class TestExtractionDb(unittest.TestCase):
             rows = db.get_document_metadata(1)
             self.assertEqual({r["dimension_id"] for r in rows}, {None, "x"})
         finally:
-            for suffix in ["", "-wal", "-shm"]:
-                p = legacy_path + suffix
-                if os.path.exists(p):
-                    try:
-                        os.remove(p)
-                    except OSError:
-                        pass
+            remove_db_files(legacy_path)
 
 
 if __name__ == "__main__":

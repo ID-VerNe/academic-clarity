@@ -3,6 +3,11 @@ import os
 import sys
 import unittest
 
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path  # noqa: E402
+add_backend_to_sys_path()
+
 class TestEnvironmentReadiness(unittest.TestCase):
     def test_frontend_port_availability(self):
         """验证前端端口范围 (30517-30521) 是否有可用出口"""

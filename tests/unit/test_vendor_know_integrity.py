@@ -16,13 +16,10 @@ import sys
 import unittest
 import hashlib
 
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current:
-        break
-    current = new_current
-VENDOR_KNOW = os.path.join(current, "backend", "vendor", "know")
+# 路径引导：注入 tests/（helpers）与 backend/vendor/know（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_vendor_know_to_sys_path  # noqa: E402
+VENDOR_KNOW = add_vendor_know_to_sys_path()
 
 BASELINE = {
     "anchors.py": "3e64897873fd6e4aa5bf6eacbdde8fc25d604fd8adfdd1c3c360238255cb2300",

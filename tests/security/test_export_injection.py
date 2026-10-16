@@ -12,16 +12,10 @@ import csv
 import io
 import unittest
 
-# 动态路径发现定位 backend/
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current:
-        break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path  # noqa: E402
+add_backend_to_sys_path()
 
 from services import extraction_export as ee  # noqa: E402
 

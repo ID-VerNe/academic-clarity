@@ -1,166 +1,79 @@
 """
-Academic Clarity - Prometheus 指标导出
-提供系统运行时的各类指标收集和导出
+Academic Clarity - 指标埋点收集器与 Prometheus 导出
+
+- 指标对象定义见 metrics_registry.py（MetricRegistry）
+- 时间序列见 metrics_timeseries.py（TimeSeriesStore）
+- 本模块保留原 utils.metrics 的全部公开名字（metrics / MetricsCollector /
+  get_prometheus_metrics），其中 get_prometheus_metrics 为模块级薄封装，
+  供 `from utils.metrics import metrics, get_prometheus_metrics` 使用。
 """
 import time
-import threading
-from typing import Dict, List, Optional, Callable
-from collections import defaultdict
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
-from prometheus_client import Counter, Histogram, Gauge, Info, generate_latest, CONTENT_TYPE_LATEST
+from datetime import timedelta
+from typing import Dict, List, Optional
+
 from fastapi import Response
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
-try:
-    from backend.constants import APIConfig
-except ImportError:
-    from constants import APIConfig
+from .singleton import SingletonMeta
+from .metrics_registry import MetricRegistry
+from .metrics_timeseries import TimeSeriesStore
 
-@dataclass
-class TimeSeriesPoint:
-    """时间序列数据点"""
-    timestamp: float
-    value: float
 
-class MetricsCollector:
-    """应用指标收集器"""
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
+class MetricsCollector(metaclass=SingletonMeta):
+    """应用指标收集器（单例；双检锁线程安全语义由 SingletonMeta 提供）"""
 
     def __init__(self):
-        if self._initialized:
-            return
-        self._initialized = True
-
-        self.api_requests_total = Counter(
-            'academic_clarity_api_requests_total',
-            'Total API requests',
-            ['endpoint', 'method', 'status']
-        )
-
-        self.api_request_duration = Histogram(
-            'academic_clarity_api_request_duration_seconds',
-            'API request duration in seconds',
-            ['endpoint', 'method'],
-            buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
-        )
-
-        self.tasks_total = Counter(
-            'academic_clarity_tasks_total',
-            'Total tasks processed',
-            ['status']
-        )
-
-        self.tasks_in_progress = Gauge(
-            'academic_clarity_tasks_in_progress',
-            'Number of tasks currently in progress'
-        )
-
-        self.tasks_queued = Gauge(
-            'academic_clarity_tasks_queued',
-            'Number of tasks in queue'
-        )
-
-        self.database_operations = Histogram(
-            'academic_clarity_database_operations_seconds',
-            'Database operation duration',
-            ['operation'],
-            buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5)
-        )
-
-        self.ocr_pages_processed = Counter(
-            'academic_clarity_ocr_pages_processed_total',
-            'Total OCR pages processed',
-            ['status']
-        )
-
-        self.ocr_duration = Histogram(
-            'academic_clarity_ocr_duration_seconds',
-            'OCR processing duration',
-            buckets=(1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0)
-        )
-
-        self.app_info = Info(
-            'academic_clarity_app',
-            'Application information'
-        )
-
-        self._custom_gauges: Dict[str, Gauge] = {}
-        self._custom_counters: Dict[str, Counter] = {}
-        self._time_series: Dict[str, List[TimeSeriesPoint]] = defaultdict(list)
-
+        self.registry = MetricRegistry()
+        self._time_series = TimeSeriesStore()
         self._start_time = time.time()
 
     def record_api_request(self, endpoint: str, method: str, status_code: int, duration: float):
         """记录API请求"""
-        self.api_requests_total.labels(endpoint=endpoint, method=method, status=str(status_code)).inc()
-        self.api_request_duration.labels(endpoint=endpoint, method=method).observe(duration)
+        self.registry.api_requests_total.labels(
+            endpoint=endpoint, method=method, status=str(status_code)).inc()
+        self.registry.api_request_duration.labels(endpoint=endpoint, method=method).observe(duration)
 
     def record_task(self, status: str):
         """记录任务完成"""
-        self.tasks_total.labels(status=status).inc()
+        self.registry.tasks_total.labels(status=status).inc()
 
     def set_tasks_in_progress(self, count: int):
         """设置正在处理的任务数"""
-        self.tasks_in_progress.set(count)
+        self.registry.tasks_in_progress.set(count)
 
     def set_tasks_queued(self, count: int):
         """设置队列中的任务数"""
-        self.tasks_queued.set(count)
+        self.registry.tasks_queued.set(count)
 
     def record_database_operation(self, operation: str, duration: float):
         """记录数据库操作"""
-        self.database_operations.labels(operation=operation).observe(duration)
+        self.registry.database_operations.labels(operation=operation).observe(duration)
 
     def record_ocr_page(self, status: str):
         """记录OCR页面处理"""
-        self.ocr_pages_processed.labels(status=status).inc()
+        self.registry.ocr_pages_processed.labels(status=status).inc()
 
     def record_ocr_duration(self, duration: float):
         """记录OCR处理时长"""
-        self.ocr_duration.observe(duration)
+        self.registry.ocr_duration.observe(duration)
 
     def set_app_info(self, **kwargs):
         """设置应用信息"""
-        self.app_info.info(kwargs)
+        self.registry.app_info.info(kwargs)
 
-    def create_gauge(self, name: str, description: str, labels: Optional[List[str]] = None):
+    def create_gauge(self, name: str, description: str,
+                     labels: Optional[List[str]] = None):
         """创建自定义Gauge"""
-        if name in self._custom_gauges:
-            return self._custom_gauges[name]
+        return self.registry.create_gauge(name, description, labels)
 
-        if labels:
-            self._custom_gauges[name] = Gauge(name, description, labels)
-        else:
-            self._custom_gauges[name] = Gauge(name, description)
-        return self._custom_gauges[name]
-
-    def create_counter(self, name: str, description: str, labels: Optional[List[str]] = None):
+    def create_counter(self, name: str, description: str,
+                       labels: Optional[List[str]] = None):
         """创建自定义Counter"""
-        if name in self._custom_counters:
-            return self._custom_counters[name]
-
-        if labels:
-            self._custom_counters[name] = Counter(name, description, labels)
-        else:
-            self._custom_counters[name] = Counter(name, description)
-        return self._custom_counters[name]
+        return self.registry.create_counter(name, description, labels)
 
     def add_time_series_point(self, name: str, value: float):
         """添加时间序列数据点"""
-        self._time_series[name].append(TimeSeriesPoint(timestamp=time.time(), value=value))
-        cutoff = time.time() - 3600
-        self._time_series[name] = [
-            p for p in self._time_series[name] if p.timestamp > cutoff
-        ]
+        self._time_series.add_point(name, value)
 
     def get_uptime(self) -> float:
         """获取应用运行时间（秒）"""
@@ -171,15 +84,21 @@ class MetricsCollector:
         return {
             "uptime_seconds": self.get_uptime(),
             "uptime_human": str(timedelta(seconds=int(self.get_uptime()))),
-            "tasks_in_progress": self.tasks_in_progress._value.get(),
-            "tasks_queued": self.tasks_queued._value.get(),
+            "tasks_in_progress": self.registry.tasks_in_progress._value.get(),
+            "tasks_queued": self.registry.tasks_queued._value.get(),
         }
 
     def get_prometheus_metrics(self) -> Response:
-        """生成Prometheus格式的指标"""
+        """生成Prometheus格式的指标（Response 薄封装，装配点仍在 server.py）"""
         return Response(
             content=generate_latest(),
             media_type=CONTENT_TYPE_LATEST
         )
 
+
 metrics = MetricsCollector()
+
+
+def get_prometheus_metrics() -> Response:
+    """模块级薄封装（冻结接口）"""
+    return metrics.get_prometheus_metrics()

@@ -13,6 +13,11 @@ import urllib.parse
 
 from services.config_service import ConfigService
 
+try:
+    from backend.constants import DoiConfig, MetadataConfig
+except ImportError:
+    from constants import DoiConfig, MetadataConfig
+
 CROSSREF_HOST = "api.crossref.org"
 CROSSREF_WORKS = "https://api.crossref.org/works"
 DOI_RE = re.compile(r"^10\.\d{4,9}/[^\s?#]+$")     # 防 URL 注入（R1）
@@ -26,10 +31,11 @@ class DoiServiceError(Exception):
 def _client(db):
     """CrossRefClient：UA 注入 mailto（R4）、压底重试参数（R2）。"""
     cfg = ConfigService(db).get_crossref_config()
-    ua = f"AcademicClarity/1.0 (mailto:{cfg['mailto']})" if cfg["mailto"] else "AcademicClarity/1.0"
+    ua = (DoiConfig.USER_AGENT_TEMPLATE.format(mailto=cfg["mailto"])
+          if cfg["mailto"] else "AcademicClarity/1.0")
     from vendor.pdf_doi_toolkit import CrossRefClient
     return CrossRefClient(user_agent=ua, max_retries=cfg["max_retries"],
-                          timeout=cfg["timeout"], request_delay=0.35)
+                          timeout=cfg["timeout"], request_delay=DoiConfig.REQUEST_DELAY)
 
 
 def _assert_safe_url(url: str):
@@ -103,7 +109,7 @@ def fetch_bibtex(doi: str, db=None) -> str:
     cfg = ConfigService(db).get_crossref_config()
     req = urllib.request.Request(url, headers={
         "Accept": "application/x-bibtex",
-        "User-Agent": f"AcademicClarity/1.0 (mailto:{cfg['mailto']})"})
+        "User-Agent": DoiConfig.USER_AGENT_TEMPLATE.format(mailto=cfg['mailto'])})
     try:
         with urllib.request.urlopen(req, timeout=cfg["timeout"]) as resp:
             return resp.read().decode("utf-8", errors="replace").strip()
@@ -113,13 +119,27 @@ def fetch_bibtex(doi: str, db=None) -> str:
         raise DoiServiceError(f"crossref bibtex error: {str(e)[:60]}")
 
 
+def _read_insight(db, doc_id: int):
+    """Basic Insight 读取：优先 Database.get_basic_insight（label 走 MetadataConfig，
+    JSON 容错）；仅暴露 get_document_metadata 的最小 db 桩回退等价逻辑。"""
+    if hasattr(db, "get_basic_insight"):
+        return db.get_basic_insight(doc_id)
+    row = next((m for m in db.get_document_metadata(doc_id)
+                if m.get("label") == MetadataConfig.DEFAULT_LABEL), None)
+    if not row:
+        return None
+    try:
+        data = json.loads(row.get("content_json"))
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def verify_document(db, doc_id: int) -> dict:
     """task 链入口：读 Basic Insight → verify_doi → 落库。"""
-    metas = db.get_document_metadata(doc_id)
-    insight = next((m for m in metas if m["label"] == "Basic Insight"), None)
-    if not insight:
+    data = _read_insight(db, doc_id)
+    if data is None:
         return {"status": "unverified", "note": "no_basic_insight"}
-    data = json.loads(insight["content_json"])
     result = verify_doi(data.get("title") or "", data.get("authors") or "",
                         data.get("doi") or "", db)
     db.update_document_doi(doc_id, doi=result["doi"], doi_source=result["source"])

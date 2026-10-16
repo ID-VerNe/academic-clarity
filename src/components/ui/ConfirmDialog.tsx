@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AlertTriangle } from 'lucide-react';
+import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -17,7 +18,7 @@ interface ConfirmDialogProps {
 /**
  * 应用内确认弹窗（替代 window.confirm）：
  * - 视觉与产品一致、支持中文文案
- * - ESC 关闭、初始焦点落在「取消」（破坏性操作的安全默认）
+ * - ESC 关闭、初始焦点落在「取消」（破坏性操作的安全默认）、Tab 圈定（与设置弹窗共用 useModalFocusTrap）
  */
 export const ConfirmDialog = ({
   open,
@@ -30,17 +31,7 @@ export const ConfirmDialog = ({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) => {
-  const cancelRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    cancelRef.current?.focus();
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onCancel]);
+  const dialogRef = useModalFocusTrap({ active: open, onEscape: onCancel });
 
   return (
     <AnimatePresence>
@@ -54,6 +45,7 @@ export const ConfirmDialog = ({
             className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
           />
           <motion.div
+            ref={dialogRef}
             role="alertdialog"
             aria-modal="true"
             aria-label={title}
@@ -73,7 +65,6 @@ export const ConfirmDialog = ({
             </div>
             <div className="flex justify-end gap-2 mt-6">
               <button
-                ref={cancelRef}
                 onClick={onCancel}
                 disabled={busy}
                 className="px-4 py-2 text-xs font-bold text-slate-600 rounded-xl hover:bg-slate-100 transition-colors disabled:opacity-50"
