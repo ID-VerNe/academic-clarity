@@ -1,54 +1,31 @@
 import os
 import sys
 import unittest
-import uuid
 import shutil
-import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-# 强力隔离环境：在导入 server 之前先伪造 argv
-unique_id = uuid.uuid4().hex
-test_ws = os.path.abspath(os.path.join(os.path.dirname(__file__), f"test_ws_api_{unique_id}"))
-if not os.path.exists(test_ws): os.makedirs(test_ws)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import (  # noqa: E402
+    add_backend_to_sys_path,
+    make_temp_ws,
+    poll_until,
+    server_test_client,
+)
+add_backend_to_sys_path()
 
-# 将测试路径注入 sys.argv 欺骗 server.py 的初始化逻辑
-sys.argv = [sys.argv[0], "38392", test_ws]
-
-# Add backend to path for imports
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current: break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
-
-from fastapi.testclient import TestClient
-import server
-from server import app, state
 
 class TestApiUploadFlow(unittest.TestCase):
     def setUp(self):
-        # Ensure state is initialized for testing
-        state.initialize(test_ws)
-        # 使用上下文管理器触发 lifespan，启动 TaskHub worker，
-        # 否则入队的任务永远不会被执行，mock 不会被调用
-        self._client_cm = TestClient(app)
-        self.client = self._client_cm.__enter__()
-        self.test_ws = test_ws
+        # server_test_client 内部伪造 argv 并触发 lifespan 启动 TaskHub
+        # worker，否则入队的任务永远不会被执行，mock 不会被调用
+        self.ws = make_temp_ws()
+        self._cm = server_test_client(38392, self.ws)
+        self.client, self.state = self._cm.__enter__()
 
     def tearDown(self):
-        self._client_cm.__exit__(None, None, None)
-
-    @staticmethod
-    def _wait_for_call(mock, timeout=5.0):
-        """等待异步 worker 认领任务（任务通过队列异步派发）"""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if mock.called:
-                return
-            time.sleep(0.1)
+        self._cm.__exit__(None, None, None)
+        shutil.rmtree(self.ws, ignore_errors=True)
 
     @patch('routes.documents.run_full_ocr_workflow')
     def test_upload_api_logic(self, mock_ocr):
@@ -66,24 +43,24 @@ class TestApiUploadFlow(unittest.TestCase):
         self.assertTrue(data["success"])
 
         # 3. 验证物理文件
-        physical_path = os.path.join(self.test_ws, "api_test.pdf")
+        physical_path = os.path.join(self.ws, "api_test.pdf")
         self.assertTrue(os.path.exists(physical_path), "File was not copied!")
 
         # 4. 验证后台任务是否被调用
-        self._wait_for_call(mock_ocr)
+        poll_until(lambda: mock_ocr.called, timeout=5.0)
         self.assertTrue(mock_ocr.called)
         print("  API Upload Flow Logic: PASS")
 
     def test_reprocess_api_logic(self):
         """验证重新处理接口"""
-        doc_id = state.db.add_document("retry.pdf", "o", os.path.join(self.test_ws, "retry.pdf"))
+        doc_id = self.state.db.add_document("retry.pdf", "o", os.path.join(self.ws, "retry.pdf"))
         # 创建一个空文件
-        with open(os.path.join(self.test_ws, "retry.pdf"), "w") as f: f.write("m")
+        with open(os.path.join(self.ws, "retry.pdf"), "w") as f: f.write("m")
 
         with patch('routes.documents.run_full_ocr_workflow') as mock_ocr:
             response = self.client.post(f"/documents/{doc_id}/reprocess")
             self.assertEqual(response.status_code, 200)
-            self._wait_for_call(mock_ocr)
+            poll_until(lambda: mock_ocr.called, timeout=5.0)
             self.assertTrue(mock_ocr.called)
         print("  API Reprocess Endpoint: PASS")
 

@@ -2,20 +2,11 @@ import os
 import sys
 import threading
 import unittest
-import uuid
-import time
-import shutil
 
-# Ensure the backend directory is in sys.path
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-current = BASE_DIR
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current: break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path, make_temp_db, remove_db_files  # noqa: E402
+add_backend_to_sys_path()
 
 from database import Database
 from utils.security import secure_filename
@@ -23,23 +14,11 @@ from services.doi_service import _assert_safe_url, DoiServiceError, fetch_bibtex
 
 class TestSecurityAndConcurrency(unittest.TestCase):
     def setUp(self):
-        self.db_path = os.path.join(BASE_DIR, f"test_audit_{uuid.uuid4().hex}.db")
-        if os.path.exists(self.db_path):
-            os.remove(self.db_path)
+        # 临时 DB 落系统 temp（ac_test_ 前缀，调度器可清理）
+        self.db_path = make_temp_db("ac_test_audit")
 
     def tearDown(self):
-        # Try to clean up
-        for _ in range(5):
-            try:
-                if os.path.exists(self.db_path):
-                    os.remove(self.db_path)
-                # Also try to remove WAL/SHM files
-                for ext in ["-wal", "-shm"]:
-                    if os.path.exists(self.db_path + ext):
-                        os.remove(self.db_path + ext)
-                break
-            except PermissionError:
-                time.sleep(0.2)
+        remove_db_files(self.db_path)
 
     def test_path_sanitization(self):
         print("\n[Test] Path Sanitization...")
@@ -58,17 +37,21 @@ class TestSecurityAndConcurrency(unittest.TestCase):
             self.assertNotIn("\\", result)
             print(f"  Passed: {input_name} -> {result}")
 
-    def test_database_concurrency(self):
-        print("\n[Test] Database Concurrency (WAL & Timeout)...")
+    def test_wal_mode_enabled(self):
+        # 行为分段：WAL 日志模式检查
+        print("\n[Test] WAL Journal Mode...")
         db = Database(self.db_path)
-        
-        # Check if WAL is enabled
+
         with db.get_connection() as conn:
             mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
             self.assertEqual(mode.lower(), "wal")
             print(f"  Journal Mode is WAL: OK")
 
-        # Test concurrent writes
+    def test_concurrent_writes_no_locks(self):
+        # 行为分段：并发写无锁错误
+        print("\n[Test] Database Concurrency (WAL & Timeout)...")
+        db = Database(self.db_path)
+
         errors = []
         def worker(worker_id):
             try:

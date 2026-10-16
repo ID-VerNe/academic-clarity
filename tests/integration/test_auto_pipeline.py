@@ -4,27 +4,24 @@ import unittest
 import uuid
 import shutil
 import asyncio
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-# Add backend to path for imports
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path, make_temp_ws  # noqa: E402
+add_backend_to_sys_path()
+
+# 样例 PDF 查找基准（tests/ 目录，保持原查找位置）
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-current = BASE_DIR
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current: break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
 
-from database import Database
-from services.workspace_service import WorkspaceService
+from database import Database  # noqa: E402
+from services.workspace_service import WorkspaceService  # noqa: E402
+
 
 class TestAutoPipeline(unittest.TestCase):
     def setUp(self):
         self.unique_id = uuid.uuid4().hex
-        self.test_dir = os.path.join(BASE_DIR, f"test_auto_ws_{self.unique_id}")
-        os.makedirs(self.test_dir)
+        self.test_dir = make_temp_ws()
         
         # 准备一个真实的 PDF 文件用于测试（从根目录 workspace 拷贝）
         self.src_pdf = os.path.join(os.path.dirname(BASE_DIR), "workspace", "10_48550-arxiv_2103_12553.pdf")

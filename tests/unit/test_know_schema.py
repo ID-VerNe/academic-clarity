@@ -2,7 +2,7 @@
 
 peer-review Gap 5：2 字符 CJK 查询必须返行——FTS5 trigram/unicode61
 对 '交易' 均返 0，唯一修复是 config.search_claims 的 LIKE 兜底。
-改造点：路径发现改为动态找 backend/ + backend/vendor/know；
+改造点：路径引导经 tests/helpers（add_vendor_know_to_sys_path）；
 其余逐一保持原样（含原始 INSERT 不走 FTS 同步、专测 LIKE 兜底）。
 """
 import os
@@ -11,16 +11,10 @@ import sqlite3
 import unittest
 import tempfile
 
-# 动态路径发现定位 backend/
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current:
-        break
-    current = new_current
-VENDOR_KNOW = os.path.join(current, "backend", "vendor", "know")
-if os.path.exists(VENDOR_KNOW) and VENDOR_KNOW not in sys.path:
-    sys.path.insert(0, VENDOR_KNOW)
+# 路径引导：注入 tests/（helpers）与 backend/vendor/know（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_vendor_know_to_sys_path  # noqa: E402
+add_vendor_know_to_sys_path()
 
 from config import init_db, SCHEMA_SQL, search_claims  # noqa: E402
 

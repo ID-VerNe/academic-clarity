@@ -235,8 +235,14 @@
 | 1 | F6 | 前端 Reader/Settings/App/client 组 + types 整理 + 别名清理 |
 | 1 | F7 | 测试基础设施（run_all_tests 重构 + 清理修复 + run_app.bat + test_real_world 安全修复） |
 | 2 | F4 | LiteLLM 完全移除（ai_service 重写 + 错误协议统一 + 测试 mock + debug_ocr 删除 + python_embed 包清理） |
-| 3 | F7a/F7b | 测试样板全量迁移（integration+security / unit+system 分治） |
-| 4 | 主代理 | 全量测试 + 报告更新 + 合并 main |
+| 3-预建 | 主代理 | `tests/e2e_llm_harness.py`（E2E 共享 harness）+ helpers 共享替身（`bb48567`） |
+| 3 | F7a | 测试样板迁移：integration（7）✅ + security（4）⚠️（限流中断，2 文件由主代理续完） |
+| 3 | F7b | 测试样板迁移：unit（16 文件）⚠️（限流中断，8 文件完成后由主代理续完剩余 8 个） |
+| 3 | F7c | 测试样板迁移：system（5 文件，含 2 个 E2E → `e2e_llm_harness` + AC_E2E_LLM 实跑验证）✅ |
+| 3-收尾 | 主代理 | 限流中断遗留 12 文件续完（security 4 + unit 8） |
+| 4 | 主代理 | 全量测试 + E2E 实跑 + 报告终稿 + 合并 main |
+
+> 执行说明：F7a/F7b 代理在 2026-10-16 因 API 频率限流（429）中断；中断前成果经逐一核验完整可用（无残留样板、语法全过、用例数不减），遗留 12 文件（security 4 + unit 8）由主代理按同一迁移规范续完。F7c 的 E2E 实跑一次通过（tex 4/4 + extraction 2/2，无重试）。
 
 ---
 
@@ -289,9 +295,22 @@
 - 物理删除 `python_embed/Lib/site-packages/litellm` + `litellm-1.82.1.dist-info`；验证 `import litellm` → ModuleNotFoundError；`import server` 正常
 - 全量测试 **34/34 PASS**（137.70s，无 litellm 环境）
 
+### 批次 3 — 测试样板全量迁移（commit 见 git log）
+
+- 32 个测试文件全部迁移到共享基础设施（+425/−1136，净减 ~711 行）：
+  - **T-01 路径引导**（32/32）：8 行 while 样板 → 4 行标准（`tests/helpers.py` 的 `add_backend_to_sys_path` / `add_vendor_know_to_sys_path`）
+  - **T-02 server 脚手架**（6 文件）：伪造 argv + 模块级 `import server` + `TestClient` → `server_test_client(port, ws)`（类级共享语义按原文件保留）
+  - **T-03 E2E harness**（2 文件，-412 行）：每文件 ~150 行 server 子进程样板 → `e2e_llm_harness.LlmE2eHarness`；断言与 `AC_E2E_LLM` 门控零改动
+  - **T-04 临时资源**：落 cwd / 源码树的 DB、ws 目录 → `make_temp_db` / `make_temp_ws`（系统 temp + `ac_test_` 前缀，调度器可清理）+ `remove_db_files`（含 -wal/-shm）
+  - **T-06 共享替身**：本地 `FakeClient` → `helpers.FakeCrossrefClient`；mock 响应构造 → `fake_completion_response`；`_wait_for_call` → `poll_until`
+  - **T-10 / T-11**：`test_final_audit` 并发方法拆为 WAL / 并发写两用例；`test_database` DOI 场景 subTest 化
+- 用例数全部不减（唯一变化：final_audit 4→5，为拆分增量）；断言、用例名、skip 条件、patch 目标字符串逐文件比对保持
+- 迁移质量验证：32 文件逐个实跑全绿 → 全量 **34/34 PASS**（44.22s）→ E2E 终验收 **tex 4/4（29.4s）+ extraction 2/2（19.5s）**
+- 执行说明：F7a/F7b 代理因 429 限流中断（详见 §7）；中断前成果经核验完整，遗留 12 文件（security 4 + unit 8）由主代理按同一规范续完
+
 - [x] 批次 1 完成 + 全量测试
 - [x] 批次 2（LiteLLM 移除）完成 + 全量测试
-- [ ] 批次 3（测试迁移）完成 + 全量测试
+- [x] 批次 3（测试迁移）完成 + 全量测试
 - [ ] 报告终稿 + 合并 main
 
 ---

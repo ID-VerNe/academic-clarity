@@ -13,16 +13,10 @@ import unittest
 import uuid
 from unittest.mock import patch, AsyncMock
 
-# 动态路径发现定位 backend/
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current:
-        break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path, make_temp_db, remove_db_files  # noqa: E402
+add_backend_to_sys_path()
 
 from database import Database                       # noqa: E402
 from services import extraction_service as es       # noqa: E402
@@ -30,17 +24,11 @@ from services import extraction_service as es       # noqa: E402
 
 class ExtractionServiceTestBase(unittest.TestCase):
     def setUp(self):
-        self.db_path = f"test_db_extsvc_{uuid.uuid4().hex}.db"
+        self.db_path = make_temp_db()
         self.db = Database(self.db_path)
 
     def tearDown(self):
-        for suffix in ["", "-wal", "-shm"]:
-            p = self.db_path + suffix
-            if os.path.exists(p):
-                try:
-                    os.remove(p)
-                except OSError:
-                    pass
+        remove_db_files(self.db_path)
 
     def _add_doc(self, status="completed", md="Some OCR markdown text."):
         doc_id = self.db.add_document("p.pdf", "/raw/p.pdf", f"/stored/{uuid.uuid4().hex}.pdf")

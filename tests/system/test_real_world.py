@@ -10,26 +10,19 @@ import sys
 import asyncio
 import json
 import time
-import uuid
 import shutil
 
-# --- Path Configuration ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-current = BASE_DIR
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current: break
-    current = new_current
-ROOT_DIR = current
-BACKEND_PATH = os.path.join(ROOT_DIR, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path  # noqa: E402
+ROOT_DIR = os.path.dirname(add_backend_to_sys_path())
+from helpers import make_temp_db, make_temp_ws, remove_db_files  # noqa: E402
 
 KEY_FILE = os.path.join(ROOT_DIR, "test", "key.json")
 DEFAULT_PDF = os.path.join(ROOT_DIR, "workspace", "10_48550-arxiv_2103_12553.pdf")
 
-from database import Database
-from services.ocr_service import run_full_ocr_workflow
+from database import Database  # noqa: E402
+from services.ocr_service import run_full_ocr_workflow  # noqa: E402
 
 
 def _load_key():
@@ -46,9 +39,8 @@ async def run_real_integration_test(key, pdf_path):
     print("====================================================")
 
     # 1. 初始化测试环境
-    test_ws = os.path.join(BASE_DIR, f"real_test_workspace_{uuid.uuid4().hex}")
-    os.makedirs(test_ws, exist_ok=True)
-    db_path = os.path.join(test_ws, f"real_test_{uuid.uuid4().hex}.db")
+    test_ws = make_temp_ws("ac_test_ws_real")
+    db_path = make_temp_db("ac_test_db_real")
     db = Database(db_path)
     exit_code = 1
 
@@ -90,16 +82,8 @@ async def run_real_integration_test(key, pdf_path):
         exit_code = 1
     finally:
         # Cleanup
-        if os.path.exists(db_path):
-            try:
-                os.remove(db_path)
-                for ext in ["-wal", "-shm"]:
-                    if os.path.exists(db_path + ext):
-                        os.remove(db_path + ext)
-            except OSError:
-                pass
-        if os.path.exists(test_ws):
-            shutil.rmtree(test_ws, ignore_errors=True)
+        remove_db_files(db_path)
+        shutil.rmtree(test_ws, ignore_errors=True)
     return exit_code
 
 

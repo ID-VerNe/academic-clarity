@@ -1,81 +1,38 @@
 """tex 上传分流与全流程集成测试（Phase 0）。
 
-骨架仿 tests/integration/test_api_upload_flow.py：导入 server 前注入
-sys.argv；state.initialize(每测试独立 UUID workspace)；TestClient 上下文
-触发 lifespan 启动 worker；轮询替代定长 sleep。
+骨架使用共享 helpers：server_test_client（每测试独立 workspace + lifespan
+启动 worker）；TEX 夹具取自 fixtures_data；轮询替代定长 sleep。
 """
 import os
 import sys
 import unittest
-import uuid
 import shutil
-import time
 import json
 
-# 强力隔离环境：在导入 server 之前先伪造 argv
-unique_id = uuid.uuid4().hex
-module_ws = os.path.abspath(os.path.join(os.path.dirname(__file__), f"test_ws_tex_{unique_id}"))
-if not os.path.exists(module_ws):
-    os.makedirs(module_ws)
-
-sys.argv = [sys.argv[0], "38392", module_ws]
-
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current:
-        break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
-
-from fastapi.testclient import TestClient  # noqa: E402
-from unittest.mock import patch, AsyncMock  # noqa: E402
-import server  # noqa: E402
-from server import app, state  # noqa: E402
-
-TEX_FIXTURE = (
-    "\\documentclass{article}\n"
-    "\\title{Real Title}\n"
-    "\\begin{document}\n"
-    "\\begin{abstract}\nWe prove things.\n\\end{abstract}\n"
-    "\\section{Introduction}\nThis is the introduction body.\n"
-    "\\section{Method}\nWe use a method.\n"
-    "\\end{document}\n"
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import (  # noqa: E402
+    add_backend_to_sys_path,
+    make_temp_ws,
+    poll_until,
+    server_test_client,
 )
+add_backend_to_sys_path()
+from fixtures_data import TEX_FIXTURE  # noqa: E402
+from unittest.mock import patch, AsyncMock  # noqa: E402
 
 
 class TestTexUploadFlow(unittest.TestCase):
     def setUp(self):
-        # 每测试独立 UUID workspace（agents.md §3 并行隔离）
-        self.test_ws = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), f"test_ws_tex_case_{uuid.uuid4().hex}")
-        )
-        os.makedirs(self.test_ws, exist_ok=True)
-        # TestClient 上下文触发 lifespan，启动 TaskHub worker
-        self._client_cm = TestClient(app)
-        self.client = self._client_cm.__enter__()
-        # lifespan 按 argv 的 module_ws 初始化；随后重指向到本测试 workspace
-        state.initialize(self.test_ws)
+        # 每测试独立 workspace（agents.md §3 并行隔离）；server_test_client
+        # 内部触发 lifespan 启动 TaskHub worker
+        self.ws = make_temp_ws()
+        self._cm = server_test_client(38392, self.ws)
+        self.client, self.state = self._cm.__enter__()
 
     def tearDown(self):
-        self._client_cm.__exit__(None, None, None)
-        shutil.rmtree(self.test_ws, ignore_errors=True)
-
-    @classmethod
-    def tearDownClass(cls):
-        # 清理 argv 注入用的模块级 workspace
-        shutil.rmtree(module_ws, ignore_errors=True)
-
-    @staticmethod
-    def _wait_for(predicate, timeout=15.0):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if predicate():
-                return True
-            time.sleep(0.1)
-        return False
+        self._cm.__exit__(None, None, None)
+        shutil.rmtree(self.ws, ignore_errors=True)
 
     def _upload(self, filename, content):
         return self.client.post(
@@ -89,13 +46,13 @@ class TestTexUploadFlow(unittest.TestCase):
         resp = self._upload("paper.tex", TEX_FIXTURE.encode("utf-8"))
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["success"])
-        self.assertTrue(os.path.exists(os.path.join(self.test_ws, "paper.tex")))
+        self.assertTrue(os.path.exists(os.path.join(self.ws, "paper.tex")))
 
         ok = self._wait_for(lambda: mock_tex.called)
         self.assertTrue(ok, "tex workflow was never called")
         self.assertFalse(mock_ocr.called, "OCR workflow must not run for .tex")
         args = mock_tex.call_args[0]
-        self.assertEqual(args[1], os.path.join(self.test_ws, "paper.tex"))
+        self.assertEqual(args[1], os.path.join(self.ws, "paper.tex"))
 
     @patch('routes.documents.run_full_ocr_workflow', new_callable=AsyncMock)
     @patch('routes.documents.run_tex_workflow', new_callable=AsyncMock)
@@ -112,7 +69,7 @@ class TestTexUploadFlow(unittest.TestCase):
         self.assertTrue(ok, "tex workflow was never called for .zip")
         self.assertFalse(mock_ocr.called, "OCR workflow must not run for .zip")
         self.assertEqual(
-            mock_tex.call_args[0][1], os.path.join(self.test_ws, "src.zip")
+            mock_tex.call_args[0][1], os.path.join(self.ws, "src.zip")
         )
 
     @patch('routes.documents.run_full_ocr_workflow', new_callable=AsyncMock)
@@ -120,7 +77,7 @@ class TestTexUploadFlow(unittest.TestCase):
     def test_upload_unsupported_ext_rejected(self, mock_tex, mock_ocr):
         resp = self._upload("evil.exe", b"MZ fake binary")
         self.assertEqual(resp.status_code, 400)
-        self.assertFalse(os.path.exists(os.path.join(self.test_ws, "evil.exe")))
+        self.assertFalse(os.path.exists(os.path.join(self.ws, "evil.exe")))
         self.assertFalse(mock_tex.called)
         self.assertFalse(mock_ocr.called)
 
@@ -165,7 +122,7 @@ class TestTexUploadFlow(unittest.TestCase):
     @patch('routes.documents.run_full_ocr_workflow', new_callable=AsyncMock)
     @patch('routes.documents.run_tex_workflow', new_callable=AsyncMock)
     def test_workspace_sync_routes_tex(self, mock_tex, mock_ocr):
-        tex_path = os.path.join(self.test_ws, "scanned.tex")
+        tex_path = os.path.join(self.ws, "scanned.tex")
         with open(tex_path, "w", encoding="utf-8") as f:
             f.write(TEX_FIXTURE)
 

@@ -5,16 +5,10 @@ import unittest
 import uuid
 import shutil
 
-# Add backend to path for imports
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-current = BASE_DIR
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current: break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path, make_temp_ws  # noqa: E402
+add_backend_to_sys_path()
 
 from database import Database
 from services.workspace_service import WorkspaceService
@@ -22,9 +16,8 @@ from services.workspace_service import WorkspaceService
 class TestWorkspaceSync(unittest.TestCase):
     def setUp(self):
         self.unique_id = uuid.uuid4().hex
-        self.test_dir = os.path.join(BASE_DIR, f"test_workspace_{self.unique_id}")
-        os.makedirs(self.test_dir)
-        
+        # 临时 workspace 目录落系统 temp（ac_test_ 前缀，调度器可清理）
+        self.test_dir = make_temp_ws()
         self.db_path = os.path.join(self.test_dir, f"test_db_{self.unique_id}.db")
         self.db = Database(self.db_path)
         self.service = WorkspaceService(self.test_dir, self.db)

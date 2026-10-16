@@ -7,28 +7,22 @@ import json
 import uuid
 import shutil
 
-# --- Path Configuration ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-current = BASE_DIR
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current: break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import (  # noqa: E402
+    add_backend_to_sys_path, fake_completion_response, make_temp_ws)
+add_backend_to_sys_path()
 
-from database import Database
-from services.ocr_service import run_full_ocr_workflow
-from services.ai_service import call_chat_api
+from database import Database  # noqa: E402
+from services.ocr_service import run_full_ocr_workflow  # noqa: E402
+from services.ai_service import call_chat_api  # noqa: E402
+
 
 class TestAcademicClarityIntegration(unittest.TestCase):
     def setUp(self):
         # 1. 设置独立的测试数据库和工作区
         self.unique_id = uuid.uuid4().hex
-        self.test_workspace = os.path.join(BASE_DIR, f"test_workspace_int_{self.unique_id}")
-        if not os.path.exists(self.test_workspace):
-            os.makedirs(self.test_workspace)
+        self.test_workspace = make_temp_ws()
         
         # 2. 生成 Mock PDF 文件
         self.test_pdf = os.path.join(self.test_workspace, "integration_test.pdf")
@@ -100,10 +94,8 @@ class TestAcademicClarityIntegration(unittest.TestCase):
         async def run_mocked_chat():
             # 拦截 client 工厂（_make_client seam）：一条 mock 覆盖 ai_service 全部网络出口
             with patch('services.ai_service._make_client') as mock_make:
-                mock_response = MagicMock()
-                mock_response.choices = [MagicMock()]
-                mock_response.choices[0].message.content = "Response"
-                mock_make.return_value.chat.completions.create.return_value = mock_response
+                create = mock_make.return_value.chat.completions.create
+                create.return_value = fake_completion_response("Response")
 
                 response = await call_chat_api("Hi", mock_context, {"api_key":"k", "api_base":"b", "model_name":"m"})
                 self.assertEqual(response, "Response")

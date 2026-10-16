@@ -4,21 +4,13 @@ import unittest
 import asyncio
 import json
 import shutil
-import sqlite3
-import uuid
-from unittest.mock import MagicMock, patch
-from io import BytesIO
+from unittest.mock import patch
 
-# --- Path Configuration ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-current = BASE_DIR
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current: break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path  # noqa: E402
+add_backend_to_sys_path()
+from helpers import fake_completion_response, make_temp_db, make_temp_ws, remove_db_files  # noqa: E402
 
 from database import Database
 from services.ocr_service import run_full_ocr_workflow, EmptyFileError
@@ -26,31 +18,14 @@ from services.ai_service import call_json_extraction_api
 
 class TestEdgeCases(unittest.TestCase):
     def setUp(self):
-        self.test_workspace = os.path.join(BASE_DIR, f"test_workspace_edge_{uuid.uuid4().hex}")
-        if not os.path.exists(self.test_workspace):
-            os.makedirs(self.test_workspace)
-        
-        self.db_path = os.path.join(self.test_workspace, f"test_library_edge_{uuid.uuid4().hex}.db")
-        if os.path.exists(self.db_path):
-            os.remove(self.db_path)
-        
+        self.test_workspace = make_temp_ws("ac_test_ws_edge")
+        self.db_path = make_temp_db("ac_test_db_edge")
         self.db = Database(self.db_path)
         self.db.set_config("DEEPSEEK_API_KEY", "test_key")
 
     def tearDown(self):
-        if os.path.exists(self.db_path):
-            try:
-                os.remove(self.db_path)
-                for ext in ["-wal", "-shm"]:
-                    if os.path.exists(self.db_path + ext):
-                        os.remove(self.db_path + ext)
-            except:
-                pass
-        if os.path.exists(self.test_workspace):
-            try:
-                shutil.rmtree(self.test_workspace)
-            except:
-                pass
+        remove_db_files(self.db_path)
+        shutil.rmtree(self.test_workspace, ignore_errors=True)
 
     def test_empty_pdf_handling(self):
         """1. Test handling of an empty (0-byte) PDF file."""
@@ -80,10 +55,7 @@ class TestEdgeCases(unittest.TestCase):
             with patch('services.ai_service._make_client') as mock_make:
                 create = mock_make.return_value.chat.completions.create
                 # Case 1: Non-JSON content
-                mock_response = MagicMock()
-                mock_response.choices = [MagicMock()]
-                mock_response.choices[0].message.content = "This is not JSON"
-                create.return_value = mock_response
+                create.return_value = fake_completion_response("This is not JSON")
 
                 res = await call_json_extraction_api("content", api_config, "prompt")
                 data = json.loads(res)

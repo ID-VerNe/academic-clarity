@@ -1,25 +1,18 @@
 """tex_service 单元测试（Phase 0）。
 
-UUID 临时目录隔离；动态路径发现定位 backend/；适配层自行把
-backend/vendor 入 sys.path。固化 vendor 已知怪癖（Q1/Q2/Q3/Q7）。
+临时目录落系统 temp（ac_test_ 前缀）；路径引导经 tests/helpers 统一；
+适配层自行把 backend/vendor 入 sys.path。固化 vendor 已知怪癖（Q1/Q2/Q3/Q7）。
 """
 import os
 import sys
 import unittest
-import uuid
 import shutil
 import zipfile
 
-# 动态路径发现：向上遍历找 backend/
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current:
-        break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_backend_to_sys_path, make_temp_ws  # noqa: E402
+add_backend_to_sys_path()
 
 from services.tex_service import (  # noqa: E402
     TexConversionError,
@@ -32,11 +25,8 @@ from services.tex_service import (  # noqa: E402
 
 class TestTexService(unittest.TestCase):
     def setUp(self):
-        self.tmp = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            f"test_tex_unit_{uuid.uuid4().hex}",
-        )
-        os.makedirs(self.tmp)
+        # 临时目录落系统 temp（ac_test_ 前缀，调度器可清理）
+        self.tmp = make_temp_ws("ac_test_tex_unit")
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)

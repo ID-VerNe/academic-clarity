@@ -22,16 +22,10 @@ import unittest
 import tempfile
 import subprocess
 
-# 动态路径发现定位 backend/
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current:
-        break
-    current = new_current
-VENDOR_KNOW = os.path.join(current, "backend", "vendor", "know")
-if os.path.exists(VENDOR_KNOW) and VENDOR_KNOW not in sys.path:
-    sys.path.insert(0, VENDOR_KNOW)
+# 路径引导：注入 tests/（helpers）与 backend/vendor/know（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import add_vendor_know_to_sys_path  # noqa: E402
+VENDOR_KNOW = add_vendor_know_to_sys_path()  # CLI 子进程包装器复用该路径
 
 import know  # noqa: E402
 

@@ -16,16 +16,10 @@ import unittest
 import urllib.error
 from unittest.mock import patch, MagicMock
 
-# 动态路径发现定位 backend/
-current = os.path.dirname(os.path.abspath(__file__))
-while current and not os.path.exists(os.path.join(current, "backend")):
-    new_current = os.path.dirname(current)
-    if new_current == current:
-        break
-    current = new_current
-BACKEND_PATH = os.path.join(current, "backend")
-if os.path.exists(BACKEND_PATH) and BACKEND_PATH not in sys.path:
-    sys.path.insert(0, BACKEND_PATH)
+# 路径引导：注入 tests/（helpers）与 backend/（被测模块）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import FakeCrossrefClient, FakeDb, add_backend_to_sys_path  # noqa: E402
+add_backend_to_sys_path()
 
 from services.doi_service import (  # noqa: E402
     DoiServiceError,
@@ -37,31 +31,6 @@ from services.doi_service import (  # noqa: E402
     verify_doi,
     verify_document,
 )
-
-
-class FakeDb:
-    """最小 db 桩：仅实现 ConfigService 需要的 get_config。"""
-
-    def __init__(self, configs=None):
-        self.configs = configs or {}
-
-    def get_config(self, key, default=""):
-        return self.configs.get(key, default)
-
-
-class FakeClient:
-    """CrossRefClient 桩：返回预置 search_by_title 结果或抛错。"""
-
-    def __init__(self, result=None, exc=None):
-        self.result = result
-        self.exc = exc
-        self.calls = []
-
-    def search_by_title(self, title, expected_author=None):
-        self.calls.append((title, expected_author))
-        if self.exc:
-            raise self.exc
-        return self.result
 
 
 class TestNormalizeDoi(unittest.TestCase):
@@ -158,7 +127,7 @@ class TestVerifyDoi(unittest.TestCase):
 
     def _patch_client(self, result=None, exc=None):
         return patch("services.doi_service._client",
-                     lambda db=None: FakeClient(result=result, exc=exc))
+                     lambda db=None: FakeCrossrefClient(result=result, exc=exc))
 
     # ── 主路径 ──────────────────────────────────────────────
 
@@ -324,7 +293,7 @@ class TestVerifyDocument(unittest.TestCase):
                        "doi": "10.1109/TVCG.2023.12345"})}]
         db = self.DocDb(metas)
         with patch("services.doi_service._client",
-                   lambda db=None: FakeClient(
+                   lambda db=None: FakeCrossrefClient(
                        result=TestVerifyDoi.CR_RESULT)):
             r = verify_document(db, 42)
         self.assertEqual(r["status"], "verified")
